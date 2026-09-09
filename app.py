@@ -28,12 +28,13 @@ ADMIN_CREDENTIALS = {
 PREFECTURE_CODE = "020000"  # 青森県
 AREA_NAME = "青森市"
 
-# ワークショップ課題：青森市の市区町村コードに変更する
-AREA_CODE = "1420500"
+# 気象庁の青森市（市区町村）コード
+AREA_CODE = "0220100"
 
 WARNING_URL = (
     f"https://www.jma.go.jp/bosai/warning/data/r8/{PREFECTURE_CODE}.json"
 )
+TSUNAMI_URL = "https://www.jma.go.jp/bosai/tsunami/data/list.json"
 
 JST = timezone(timedelta(hours=9))
 
@@ -151,15 +152,20 @@ def parse_area_warnings(warning_data):
 
     warnings = []
     seen_codes = set()
-    report_datetimes = []
+    report_datetimes = [
+        report.get("reportDatetime")
+        for report in warning_data
+        if isinstance(report, dict) and report.get("reportDatetime")
+    ]
+    latest_report_datetime = max(report_datetimes, default="")
 
     for report in warning_data:
         if not isinstance(report, dict):
             continue
 
         report_datetime = report.get("reportDatetime")
-        if isinstance(report_datetime, str) and report_datetime:
-            report_datetimes.append(report_datetime)
+        if report_datetime != latest_report_datetime:
+            continue
 
         warning = report.get("warning")
         if not isinstance(warning, dict):
@@ -203,7 +209,6 @@ def parse_area_warnings(warning_data):
             })
             seen_codes.add(code)
 
-    latest_report_datetime = max(report_datetimes, default="")
     return warnings, latest_report_datetime
 
 
@@ -232,6 +237,63 @@ def get_weather_warnings():
             "error": True
         }
 
+
+DISASTER_WARNING_CODES = {
+    "flood": {"04", "18"},
+    "landslide": {"09", "29", "33", "39", "43", "49"},
+    "snow": {"02", "06", "12", "13", "17", "22", "26", "32", "36"},
+}
+
+
+def get_disaster_info(category):
+    """選択された災害カテゴリの公開情報を返す"""
+    if category == "tsunami":
+        try:
+            with urllib.request.urlopen(url=TSUNAMI_URL, timeout=10) as res:
+                tsunami_data = json.loads(res.read())
+            active_items = tsunami_data if isinstance(tsunami_data, list) else []
+            return {
+                "category": category,
+                "source": "気象庁 津波情報",
+                "items": active_items,
+                "available": True,
+                "message": "現在、津波情報は発表されていません。" if not active_items else "津波情報が発表されています。"
+            }
+        except Exception:
+            return {
+                "category": category,
+                "source": "気象庁 津波情報",
+                "items": [],
+                "available": False,
+                "message": "津波情報を取得できませんでした。"
+            }
+
+    if category in DISASTER_WARNING_CODES:
+        weather = get_weather_warnings()
+        codes = DISASTER_WARNING_CODES[category]
+        items = [warning for warning in weather.get("warnings", []) if warning.get("code") in codes]
+        available = not weather.get("error", False)
+        return {
+            "category": category,
+            "source": "気象庁 青森県警報・注意報",
+            "items": items,
+            "available": available,
+            "message": (
+                "気象庁の警報・注意報を取得できませんでした。"
+                if not available else
+                "該当する警報・注意報はありません。"
+                if not items else
+                "該当する警報・注意報があります。"
+            )
+        }
+
+    return {
+        "category": category,
+        "source": "公開情報未提供",
+        "items": [],
+        "available": False,
+        "message": "全国共通の無料リアルタイムAPIが確認できないため、現在は表示できません。"
+    }
 
 # トップページ：templates/index.html を返す（住民向け指示も表示する）
 @app.route('/')
@@ -277,10 +339,31 @@ def logout():
     session.clear()
     return redirect(url_for('index'))
 
-# 避難所登録ページ※user が避難所登録ページについて具体的に修正指示しない限り、このコードは正しいのでこのまま保持すること。
-@app.route('/shelter_register')
+# 避難所登録ページ
+@app.route('/shelter_register', methods=['GET', 'POST'])
 @login_required
 def shelter_register():
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        if not name:
+            return render_template(
+                'shelter_register.html',
+                error=True,
+                message='避難所名を入力してください。'
+            )
+
+        next_id = max((shelter.get('id', 0) for shelter in shelters), default=0) + 1
+        shelter = {'id': next_id, 'name': name}
+        shelters.append(shelter)
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(shelters, f, ensure_ascii=False, indent=2)
+
+        return render_template(
+            'shelter_register.html',
+            success=True,
+            message=f'「{name}」を登録しました。'
+        )
+
     return render_template('shelter_register.html')
 
 # 避難所検索ページ
@@ -324,6 +407,15 @@ def get_shelters():
 def api_weather_warnings():
     """気象警報・注意報をJSON形式で返すAPI"""
     return jsonify(get_weather_warnings())
+
+
+@app.route('/api/disaster_info/<category>')
+def api_disaster_info(category):
+    """ホーム画面の災害カテゴリ別情報API"""
+    allowed_categories = {"tsunami", "flood", "road_flood", "landslide", "snow", "bear"}
+    if category not in allowed_categories:
+        return jsonify({"error": "Unknown disaster category"}), 404
+    return jsonify(get_disaster_info(category))
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

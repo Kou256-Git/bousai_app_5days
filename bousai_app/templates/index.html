@@ -1,16 +1,95 @@
 {% extends "base.html" %}
 
 {% block content %}
-<!-- 避難所マップ -->
-<h2>避難所マップ</h2>
-<div id="shelterMap" style="height: 300px;"></div>
+<div class="home-layout">
+    <section class="left-column">
+        <h2 class="panel-heading post-heading">災害・被害投稿</h2>
+        <div class="post-layout">
+            <div class="comment-box">コメント入力欄</div>
+            <div class="post-actions">
+                <div class="file-box">ファイル選択エリア<div class="folder-icon" aria-hidden="true"></div></div>
+                <button class="action-button camera-button" type="button"><span aria-hidden="true">▣</span> カメラ起動</button>
+            </div>
+        </div>
+        <div class="post-controls">
+            <button class="delete-button" type="button" aria-label="入力を削除">♧</button>
+            <button class="action-button post-button" type="button">投稿</button>
+            <div class="error-box">エラーメッセージ</div>
+        </div>
 
-<!-- 気象警報・注意報 -->
-<h2>青森市 気象警報・注意報</h2>
-<p>10分おきに自動更新されます。</p>
-<div id="weatherContent">
-  <p>読み込み中...</p>
+        <h2 class="panel-heading phone-heading">電話で被害を知らせる</h2>
+        <div class="phone-row">
+            <button class="action-button phone-button" type="button"><span aria-hidden="true">♧</span> 電話アプリを起動</button>
+            <span>TEL：〇〇〇〇-〇〇-〇〇〇〇</span>
+        </div>
+        <p class="phone-note">※この電話番号は、災害や被害状況を市の防災対策課へ知らせるための<br>専用ダイヤルです。<br>電話対応はAIが行いますので、AIの指示に従って内容をお話ください<br>災害等に関係のない連絡は極力控えるようにお願いいたします</p>
+    </section>
+
+    <section class="right-column">
+        <div class="map-tools">
+            <label class="visually-hidden" for="disasterType">地図に表示する災害情報</label>
+            <select id="disasterType" class="select-box">
+                <option value="tsunami">津波</option>
+                <option value="flood" selected>河川氾濫</option>
+                <option value="road_flood">道路冠水</option>
+                <option value="landslide">土砂崩れ</option>
+                <option value="snow">積雪</option>
+                <option value="bear">熊などの獣害</option>
+            </select>
+            <span id="mapStatus">表示中</span>
+        </div>
+        <div id="shelterMap"></div>
+        <div class="right-panels">
+            <section>
+                <h3>災害情報</h3>
+                <div class="placeholder-box"><div id="weatherContent">読み込み中...</div></div>
+            </section>
+            <section>
+                <h3>災害マニュアル一覧</h3>
+                <div class="placeholder-box placeholder-text">マニュアル一覧</div>
+            </section>
+        </div>
+    </section>
 </div>
+
+<style>
+    .home-layout { display: grid; grid-template-columns: 1.05fr 1fr; gap: 56px; }
+    .post-heading { margin-top: 8px; }
+    .panel-heading { margin: 25px 0 12px 4px; font-size: 26px; }
+    .post-layout { display: grid; grid-template-columns: 1.15fr 1fr; gap: 22px; }
+    .comment-box, .file-box, .placeholder-box { border: 1px solid var(--line-color); color: #999; }
+    .comment-box { height: 168px; display: grid; place-items: center; }
+    .post-actions { display: grid; gap: 20px; }
+    .file-box { height: 94px; padding: 10px; }
+    .folder-icon { width: 48px; height: 34px; margin-top: 14px; border: 3px solid #222; border-radius: 4px; }
+    .action-button, .delete-button, .select-box { background: var(--button-blue); border: 1px solid #8998a6; color: #243341; font-size: 21px; cursor: pointer; }
+    .action-button { height: 56px; }
+    .post-controls { display: grid; grid-template-columns: 58px 1fr 1fr; gap: 22px; margin-top: 22px; }
+    .delete-button { color: #f04c43; font-size: 32px; }
+    .error-box { padding: 16px 12px; color: #ef4039; border: 2px solid #ef4039; background: #fff3f3; }
+    .phone-heading { margin-top: 34px; }
+    .phone-row { display: flex; align-items: center; gap: 70px; margin-left: 4px; font-size: 18px; }
+    .phone-button { width: 240px; font-size: 16px; }
+    .phone-note { margin: 20px 4px; line-height: 1.3; }
+    .map-tools { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; font-size: 18px; }
+    .select-box { width: 308px; height: 56px; text-align: left; padding: 0 15px; background: #fff; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    #shelterMap { height: 262px; border: 1px solid var(--line-color); }
+    .right-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .right-panels h3 { margin: 14px 0 8px; font-size: 18px; font-weight: 400; }
+    .placeholder-box { height: 242px; padding: 16px; }
+    .placeholder-text { display: grid; place-items: center; color: #999; }
+    #weatherContent { color: #555; font-size: 13px; }
+    #weatherContent p { margin: 0 0 8px; }
+
+    @media (max-width: 600px) {
+        .home-layout, .post-layout, .right-panels { grid-template-columns: 1fr; gap: 18px; }
+        .post-controls { grid-template-columns: 48px 1fr; gap: 10px; }
+        .error-box { grid-column: 1 / -1; }
+        .phone-row { display: grid; gap: 14px; }
+        #shelterMap { height: 260px; }
+    }
+</style>
 
 <!-- Leaflet の読み込み -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -19,56 +98,68 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     // 地図の初期化（藤沢市周辺を中心に設定）
-    const map = L.map('shelterMap').setView([35.3390, 139.4903], 12);
+    const map = L.map('shelterMap').setView([40.8246, 140.7400], 11);
+    const disasterMarkers = L.layerGroup().addTo(map);
+    const disasterType = document.getElementById('disasterType');
+    const mapStatus = document.getElementById('mapStatus');
+    const disasterLabels = {
+        tsunami: '津波',
+        flood: '河川氾濫',
+        road_flood: '道路冠水',
+        landslide: '土砂崩れ',
+        snow: '積雪',
+        bear: '熊などの獣害'
+    };
 
     // OpenStreetMapタイルを追加
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // 気象警報・注意報の自動更新機能
-    function updateWeatherWarnings() {
-        fetch('/api/weather_warnings')
-            .then(response => response.json())
-            .then(data => {
-                console.log('気象情報を更新しました:', data);
-                updateWeatherContent(data);
+    function updateDisasterInfo(category) {
+        const label = disasterLabels[category];
+        mapStatus.textContent = `${label}を取得中`;
+        fetch(`/api/disaster_info/${category}`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+                return response.json();
             })
-            .catch(error => {
-                console.error('気象情報の更新に失敗しました:', error);
+            .then(data => {
+                disasterMarkers.clearLayers();
+                const items = data.items || [];
+                if (items.length > 0) {
+                    L.circleMarker([40.8246, 140.7400], {
+                        radius: 12,
+                        color: '#d83939',
+                        fillColor: '#ef6b51',
+                        fillOpacity: 0.75
+                    }).bindPopup(`${label}: ${data.message}`).addTo(disasterMarkers);
+                    mapStatus.textContent = `${label}情報あり`;
+                } else {
+                    mapStatus.textContent = data.available ? `${label}：情報なし` : `${label}：未提供`;
+                }
+                document.getElementById('weatherContent').innerHTML = `
+                    <p>${data.message}</p>
+                    <p>情報源: ${data.source}</p>
+                `;
+            })
+            .catch(() => {
+                mapStatus.textContent = `${label}：取得失敗`;
+                document.getElementById('weatherContent').innerHTML = '<p>情報を取得できませんでした。</p>';
             });
     }
 
-    function updateWeatherContent(data) {
-        const weatherContent = document.getElementById('weatherContent');
+    disasterType.addEventListener('change', function() {
+        updateDisasterInfo(this.value);
+    });
+    updateDisasterInfo(disasterType.value);
 
-        if (data.error) {
-            weatherContent.innerHTML = '<p>気象情報の取得に失敗しました</p>';
-            return;
-        }
-
-        let warningsHtml = '';
-        if (data.warnings && data.warnings.length > 0) {
-            warningsHtml = '<ul>';
-            data.warnings.forEach(warning => {
-                warningsHtml += `<li>${warning.name}（${warning.status}）</li>`;
-            });
-            warningsHtml += '</ul>';
-        } else {
-            warningsHtml = '<p>現在、警報・注意報は発表されていません</p>';
-        }
-
-        weatherContent.innerHTML = `
-            <p>対象地域: ${data.area_name || '青森市'}</p>
-            ${warningsHtml}
-            <p>最終確認: <span id="lastFetchTime">${data.last_fetch_time || '更新中...'}</span></p>
-            <p>気象庁最終発表: ${data.report_time || '不明'}</p>
-        `;
-    }
-
-    // 初回表示＋10分（600,000ミリ秒）おきに自動更新
-    updateWeatherWarnings();
-    setInterval(updateWeatherWarnings, 600000);
+    // 選択中のカテゴリを10分おきに更新
+    setInterval(function() {
+        updateDisasterInfo(disasterType.value);
+    }, 600000);
 });
 </script>
 {% endblock %}

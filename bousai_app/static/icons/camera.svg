@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 58 44" role="img" aria-label="カメラ">
+  <g fill="none" stroke="#111" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 12h42v27H8z"/>
+    <path d="M17 12l4-7h13l4 7"/>
+    <circle cx="29" cy="25" r="8"/>
+    <circle cx="29" cy="25" r="3"/>
+    <circle cx="43" cy="18" r="2" fill="#111" stroke="none"/>
+  </g>
+</svg>

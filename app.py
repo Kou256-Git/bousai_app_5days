@@ -1,9 +1,11 @@
 from flask import Flask, jsonify, request, render_template, session, redirect, url_for
 from urllib.parse import urlparse, urljoin
 from functools import wraps
+from werkzeug.utils import secure_filename
 import json
 import os
 import urllib.request
+import uuid
 from datetime import datetime, timedelta, timezone
 
 # app.py はプロジェクト直下に置く。
@@ -83,6 +85,13 @@ WARNING_CODES = {
 # サンプルデータの読み込み
 DATA_FILE = os.path.join(APP_DIR, 'data', 'shelters.json')
 INSTRUCTIONS_FILE = os.path.join(APP_DIR, 'data', 'instructions.json')
+UPLOAD_DIR = os.path.join(APP_DIR, 'uploads')
+POSTS_FILE = os.path.join(APP_DIR, 'data', 'damage_posts.json')
+
+ALLOWED_UPLOAD_EXTENSIONS = {
+    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic',
+    '.mp4', '.mov', '.avi', '.webm', '.mkv', '.m4v'
+}
 
 def load_json(path, default):
     """JSONファイルを読み込む（存在しない・壊れている場合は default を返す）"""
@@ -94,12 +103,22 @@ def load_json(path, default):
 
 shelters = load_json(DATA_FILE, [])
 instructions = load_json(INSTRUCTIONS_FILE, [])
+damage_posts = load_json(POSTS_FILE, [])
 
 def save_instructions():
     """指示ボードのデータをファイルに保存する"""
     try:
         with open(INSTRUCTIONS_FILE, 'w', encoding='utf-8') as f:
             json.dump(instructions, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def save_damage_posts():
+    """災害投稿の記録をJSONファイルに保存する"""
+    try:
+        with open(POSTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(damage_posts, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 # ────────────────────────────────
@@ -296,9 +315,69 @@ def get_disaster_info(category):
     }
 
 # トップページ：templates/index.html を返す（住民向け指示も表示する）
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def index():
     resident_notices = [i for i in instructions if i.get('target') == '住民']
+    if request.method == 'POST':
+        uploaded_files = [
+            uploaded_file for uploaded_file in request.files.getlist('attachment')
+            if uploaded_file and uploaded_file.filename
+        ]
+        if not uploaded_files:
+            return render_template(
+                'index.html',
+                resident_notices=resident_notices,
+                error=True,
+                message='ファイルをアップロードしてください。',
+                comment=request.form.get('comment', '')
+            ), 400
+
+        if len(uploaded_files) > 3:
+            return render_template(
+                'index.html',
+                resident_notices=resident_notices,
+                error=True,
+                message='選択できるファイルは最大3つまでです。',
+                comment=request.form.get('comment', '')
+            ), 400
+
+        prepared_files = []
+        for uploaded_file in uploaded_files:
+            client_filename = uploaded_file.filename
+            extension = os.path.splitext(client_filename)[1].lower()
+            if extension not in ALLOWED_UPLOAD_EXTENSIONS:
+                allowed_extensions = ', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))
+                return render_template(
+                    'index.html',
+                    resident_notices=resident_notices,
+                    error=True,
+                    message=f'次の拡張子のみ投稿可能です: {allowed_extensions}',
+                    comment=request.form.get('comment', '')
+                ), 400
+            safe_stem = secure_filename(os.path.splitext(client_filename)[0]) or 'upload'
+            prepared_files.append((uploaded_file, client_filename, extension, safe_stem))
+
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        comment = request.form.get('comment', '').strip()
+        for uploaded_file, client_filename, extension, safe_stem in prepared_files:
+            stored_name = f'{uuid.uuid4().hex}_{safe_stem}{extension}'
+            uploaded_file.save(os.path.join(UPLOAD_DIR, stored_name))
+            damage_posts.append({
+                'comment': comment,
+                'original_filename': client_filename,
+                'stored_filename': stored_name,
+                'extension': extension,
+                'content_type': uploaded_file.mimetype,
+                'created_at': datetime.now(JST).isoformat()
+            })
+        save_damage_posts()
+        return render_template(
+            'index.html',
+            resident_notices=resident_notices,
+            success=True,
+            message='情報提供ありがとうございます。'
+        )
+
     return render_template('index.html', resident_notices=resident_notices)
 
 # ログインページ

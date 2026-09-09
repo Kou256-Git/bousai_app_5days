@@ -4,23 +4,31 @@
 <div class="home-layout">
     <section class="left-column">
         <h2 class="panel-heading post-heading">災害・被害投稿</h2>
-        <div class="post-layout">
-            <div class="comment-box">コメント入力欄</div>
-            <div class="post-actions">
-                <div class="file-box">ファイル選択エリア<div class="folder-icon" aria-hidden="true"></div></div>
-                <button class="action-button camera-button" type="button"><span aria-hidden="true">▣</span> カメラ起動</button>
+        <form id="damagePostForm" class="damage-post-form" method="post" enctype="multipart/form-data">
+            <div class="post-layout">
+                <textarea id="comment" name="comment" class="comment-box" placeholder="コメントを記入してください">{{ comment|default('') }}</textarea>
+                <div class="post-actions">
+                    <label class="file-box" for="attachment">
+                        <span id="fileSelectLabel">ファイルを選択してください</span>
+                        <input id="attachment" name="attachment" type="file" class="file-input" accept="image/*,video/*" multiple>
+                        <span id="selectedFileName" class="selected-file-name" hidden></span>
+                        <span class="file-type-note">動画・画像のみ選択可</span>
+                    </label>
+                    <input id="cameraAttachment" type="file" class="file-input" accept="image/*,video/*" capture="environment">
+                    <button class="action-button camera-button" type="button" id="cameraButton"><img class="camera-icon" src="{{ url_for('static', filename='icons/camera.svg') }}" alt="">カメラ起動</button>
+                </div>
             </div>
-        </div>
-        <div class="post-controls">
-            <button class="delete-button" type="button" aria-label="入力を削除">♧</button>
-            <button class="action-button post-button" type="button">投稿</button>
-            <div class="error-box">エラーメッセージ</div>
-        </div>
+            <div class="post-controls">
+                <button class="delete-button" type="button" id="clearPostButton" aria-label="コメントとファイルをクリア"><img class="trash-icon" src="{{ url_for('static', filename='icons/trash.svg') }}" alt=""></button>
+                <button class="action-button post-button" type="submit">投稿</button>
+                <div id="postError" class="error-box{% if success %} success-box{% endif %}" role="alert"{% if not (error or success) %} hidden{% endif %}>{{ message|default('') }}</div>
+            </div>
+        </form>
 
         <h2 class="panel-heading phone-heading">電話で被害を知らせる</h2>
         <div class="phone-row">
-            <button class="action-button phone-button" type="button"><span aria-hidden="true">♧</span> 電話アプリを起動</button>
-            <span>TEL：〇〇〇〇-〇〇-〇〇〇〇</span>
+            <button class="action-button phone-button" type="button" id="phoneButton"><img class="phone-icon" src="{{ url_for('static', filename='icons/phone.svg') }}" alt="">電話アプリを起動</button>
+            <span>TEL：017-000-0000</span>
         </div>
         <p class="phone-note">※この電話番号は、災害や被害状況を市の防災対策課へ知らせるための<br>専用ダイヤルです。<br>電話対応はAIが行いますので、AIの指示に従って内容をお話ください<br>災害等に関係のない連絡は極力控えるようにお願いいたします</p>
     </section>
@@ -39,47 +47,114 @@
             <span id="mapStatus">表示中</span>
         </div>
         <div id="shelterMap"></div>
-        <div class="right-panels">
+        <div class="right-panels{% if not session.logged_in %} single-panel{% endif %}">
             <section>
                 <h3>災害情報</h3>
                 <div class="placeholder-box"><div id="weatherContent">読み込み中...</div></div>
             </section>
+            {% if session.logged_in %}
             <section>
                 <h3>災害マニュアル一覧</h3>
                 <div class="placeholder-box placeholder-text">マニュアル一覧</div>
             </section>
+            {% endif %}
         </div>
     </section>
 </div>
 
+<dialog id="phoneDialog" class="phone-dialog">
+    <form method="dialog">
+        <h3>電話アプリを起動</h3>
+        <p>次の番号を入力した状態で電話アプリを開きます。</p>
+        <input id="phoneNumber" type="tel" value="017-000-0000" readonly>
+        <div class="phone-dialog-actions">
+            <button type="button" id="closePhoneDialog">閉じる</button>
+            <a href="tel:0170000000" id="callPhoneNumber">電話アプリを開く</a>
+        </div>
+    </form>
+</dialog>
+
+<dialog id="cameraDialog" class="camera-dialog">
+    <form method="dialog">
+        <h3>カメラ撮影</h3>
+        <video id="cameraPreview" autoplay playsinline muted></video>
+        <canvas id="cameraCanvas" hidden></canvas>
+        <p id="cameraStatus">カメラを起動しています...</p>
+        <div class="camera-dialog-actions">
+            <button type="button" id="takePhotoButton">写真を撮影</button>
+            <button type="button" id="recordVideoButton">動画を撮影</button>
+            <button type="button" id="closeCameraDialog">閉じる</button>
+        </div>
+    </form>
+</dialog>
+
+<dialog id="previewDialog" class="preview-dialog">
+    <form method="dialog">
+        <h3 id="previewTitle">ファイルプレビュー</h3>
+        <img id="imagePreview" class="media-preview" alt="選択した画像のプレビュー" hidden>
+        <video id="videoPreview" class="media-preview" controls playsinline hidden></video>
+        <button type="submit">閉じる</button>
+    </form>
+</dialog>
+
 <style>
-    .home-layout { display: grid; grid-template-columns: 1.05fr 1fr; gap: 56px; }
+    .home-layout { display: grid; grid-template-columns: minmax(0, 793px) minmax(0, 1fr); gap: 32px; }
     .post-heading { margin-top: 8px; }
-    .panel-heading { margin: 25px 0 12px 4px; font-size: 26px; }
-    .post-layout { display: grid; grid-template-columns: 1.15fr 1fr; gap: 22px; }
+    .panel-heading { margin: 25px 0 18px 4px; font-size: calc(36px * var(--font-scale)); }
+    .post-layout { display: grid; grid-template-columns: minmax(0, 1.24fr) minmax(0, 1fr); gap: 30px; align-items: stretch; }
     .comment-box, .file-box, .placeholder-box { border: 1px solid var(--line-color); color: #999; }
-    .comment-box { height: 168px; display: grid; place-items: center; }
-    .post-actions { display: grid; gap: 20px; }
-    .file-box { height: 94px; padding: 10px; }
-    .folder-icon { width: 48px; height: 34px; margin-top: 14px; border: 3px solid #222; border-radius: 4px; }
-    .action-button, .delete-button, .select-box { background: var(--button-blue); border: 1px solid #8998a6; color: #243341; font-size: 21px; cursor: pointer; }
-    .action-button { height: 56px; }
-    .post-controls { display: grid; grid-template-columns: 58px 1fr 1fr; gap: 22px; margin-top: 22px; }
-    .delete-button { color: #f04c43; font-size: 32px; }
-    .error-box { padding: 16px 12px; color: #ef4039; border: 2px solid #ef4039; background: #fff3f3; }
-    .phone-heading { margin-top: 34px; }
-    .phone-row { display: flex; align-items: center; gap: 70px; margin-left: 4px; font-size: 18px; }
-    .phone-button { width: 240px; font-size: 16px; }
+    .damage-post-form { display: block; }
+    .comment-box { width: 100%; height: 232px; display: block; padding: 16px; resize: none; font: inherit; font-size: calc(24px * var(--font-scale)); text-align: left; vertical-align: top; }
+    .post-actions { display: grid; min-width: 0; gap: 28px; }
+    .file-box { min-width: 0; height: 128px; padding: 10px 16px; overflow: hidden; font-size: calc(23px * var(--font-scale)); }
+    .file-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .selected-file-name { display: block; max-height: 3.8em; min-width: 0; margin-top: 4px; overflow-x: hidden; overflow-y: auto; color: #555; font-size: calc(14px * var(--font-scale)); line-height: 1.4; overflow-wrap: anywhere; word-break: break-word; }
+    .selected-file-name[hidden] { display: none; }
+    .selected-file-name button { display: block; max-width: 100%; padding: 0; overflow-wrap: anywhere; color: #555; background: transparent; border: 0; cursor: pointer; font: inherit; text-align: left; text-decoration: underline; }
+    .file-type-note { display: block; margin-top: 4px; color: #555; font-size: calc(14px * var(--font-scale)); }
+    .action-button, .delete-button, .select-box { background: var(--button-blue); border: 1px solid #8998a6; color: #243341; font-size: calc(21px * var(--font-scale)); cursor: pointer; }
+    .action-button { width: 100%; min-width: 0; height: 76px; display: inline-flex; align-items: center; justify-content: center; gap: 26px; }
+    .camera-icon { display: block; width: 58px; height: 44px; }
+    .post-controls { display: grid; grid-template-columns: 78px minmax(0, 0.91fr) minmax(0, 1fr); gap: 30px; margin-top: 28px; align-items: stretch; }
+    .delete-button { height: 76px; color: #f04c43; }
+    .trash-icon { display: block; width: 42px; height: 44px; }
+    .post-button { font-size: calc(29px * var(--font-scale)); }
+    .error-box { min-height: 76px; padding: 22px 18px; color: #ef4039; border: 2px solid #ef4039; background: #fff3f3; font-size: calc(18px * var(--font-scale)); }
+    .success-box { color: #16833b; border-color: #16833b; background: #f1fff4; }
+    .phone-heading { margin-top: 42px; }
+    .phone-row { display: flex; align-items: center; gap: 70px; margin-left: 4px; font-size: calc(27px * var(--font-scale)); }
+    .phone-button { width: 332px; font-size: calc(21px * var(--font-scale)); }
+    .phone-icon { display: block; width: 58px; height: 52px; }
+    .phone-dialog { width: min(90vw, 420px); padding: 24px; border: 2px solid #8998a6; background: #fff; color: #222; }
+    .phone-dialog::backdrop { background: rgb(0 0 0 / 35%); }
+    .phone-dialog h3 { margin: 0 0 12px; font-size: calc(22px * var(--font-scale)); }
+    .phone-dialog p { margin: 0 0 12px; }
+    #phoneNumber { width: 100%; padding: 10px; font-size: calc(20px * var(--font-scale)); }
+    .phone-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+    .phone-dialog-actions button, .phone-dialog-actions a { padding: 10px 16px; border: 1px solid #8998a6; color: #243341; background: var(--button-blue); text-decoration: none; cursor: pointer; }
+    .camera-dialog { width: min(94vw, 560px); padding: 24px; border: 2px solid #8998a6; background: #fff; color: #222; }
+    .camera-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+    .camera-dialog h3 { margin: 0 0 12px; font-size: calc(22px * var(--font-scale)); }
+    #cameraPreview { display: block; width: 100%; max-height: 55vh; background: #111; object-fit: contain; }
+    #cameraStatus { min-height: 1.5em; margin: 10px 0; }
+    .camera-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+    .camera-dialog-actions button { padding: 10px 16px; border: 1px solid #8998a6; color: #243341; background: var(--button-blue); cursor: pointer; }
+    .preview-dialog { width: min(94vw, 720px); padding: 24px; border: 2px solid #8998a6; background: #fff; color: #222; }
+    .preview-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+    .preview-dialog h3 { margin: 0 0 14px; font-size: calc(22px * var(--font-scale)); }
+    .media-preview { display: block; width: 100%; max-height: 65vh; object-fit: contain; background: #111; }
+    .preview-dialog button { margin-top: 14px; padding: 10px 18px; border: 1px solid #8998a6; background: var(--button-blue); cursor: pointer; }
     .phone-note { margin: 20px 4px; line-height: 1.3; }
-    .map-tools { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; font-size: 18px; }
+    .map-tools { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; font-size: calc(18px * var(--font-scale)); }
     .select-box { width: 308px; height: 56px; text-align: left; padding: 0 15px; background: #fff; }
     .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     #shelterMap { height: 262px; border: 1px solid var(--line-color); }
     .right-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    .right-panels h3 { margin: 14px 0 8px; font-size: 18px; font-weight: 400; }
+    .right-panels.single-panel { grid-template-columns: 1fr; }
+    .right-panels h3 { margin: 14px 0 8px; font-size: calc(18px * var(--font-scale)); font-weight: 400; }
     .placeholder-box { height: 242px; padding: 16px; }
     .placeholder-text { display: grid; place-items: center; color: #999; }
-    #weatherContent { color: #555; font-size: 13px; }
+    #weatherContent { color: #555; font-size: calc(13px * var(--font-scale)); }
     #weatherContent p { margin: 0 0 8px; }
 
     @media (max-width: 600px) {
@@ -160,6 +235,263 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(function() {
         updateDisasterInfo(disasterType.value);
     }, 600000);
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('damagePostForm');
+    const fileInput = document.getElementById('attachment');
+    const cameraInput = document.getElementById('cameraAttachment');
+    const cameraButton = document.getElementById('cameraButton');
+    const clearButton = document.getElementById('clearPostButton');
+    const fileSelectLabel = document.getElementById('fileSelectLabel');
+    const selectedFileName = document.getElementById('selectedFileName');
+    const postError = document.getElementById('postError');
+    const phoneButton = document.getElementById('phoneButton');
+    const phoneDialog = document.getElementById('phoneDialog');
+    const closePhoneDialog = document.getElementById('closePhoneDialog');
+    const cameraDialog = document.getElementById('cameraDialog');
+    const cameraPreview = document.getElementById('cameraPreview');
+    const cameraCanvas = document.getElementById('cameraCanvas');
+    const cameraStatus = document.getElementById('cameraStatus');
+    const takePhotoButton = document.getElementById('takePhotoButton');
+    const recordVideoButton = document.getElementById('recordVideoButton');
+    const closeCameraDialog = document.getElementById('closeCameraDialog');
+    const previewDialog = document.getElementById('previewDialog');
+    const previewTitle = document.getElementById('previewTitle');
+    const imagePreview = document.getElementById('imagePreview');
+    const videoPreview = document.getElementById('videoPreview');
+    let cameraStream = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let selectedFiles = [];
+    let previewUrl = null;
+    const allowedExtensions = [
+        '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic',
+        '.mp4', '.mov', '.avi', '.webm', '.mkv', '.m4v'
+    ];
+
+    function showFileError(message) {
+        postError.textContent = message;
+        postError.classList.remove('success-box');
+        postError.hidden = false;
+    }
+
+    function syncFileInput() {
+        const transfer = new DataTransfer();
+        selectedFiles.forEach(function(file) {
+            transfer.items.add(file);
+        });
+        fileInput.files = transfer.files;
+    }
+
+    function renderSelectedFiles() {
+        selectedFileName.replaceChildren();
+        fileSelectLabel.textContent = selectedFiles.length
+            ? 'ファイルを追加'
+            : 'ファイルを選択してください';
+        if (!selectedFiles.length) {
+            selectedFileName.hidden = true;
+            return;
+        }
+        selectedFiles.forEach(function(file, index) {
+            const fileButton = document.createElement('button');
+            fileButton.type = 'button';
+            fileButton.textContent = `${index + 1}. ${file.name}`;
+            fileButton.addEventListener('click', function(event) {
+                event.preventDefault();
+                event.stopPropagation();
+                openPreview(index);
+            });
+            selectedFileName.appendChild(fileButton);
+        });
+        selectedFileName.hidden = false;
+    }
+
+    function handleSelectedFiles(files, sourceInput) {
+        const incomingFiles = Array.from(files || []);
+        if (!incomingFiles.length) {
+            return false;
+        }
+        const nextFiles = sourceInput === cameraInput
+            ? selectedFiles.concat(incomingFiles)
+            : selectedFiles.concat(incomingFiles);
+        if (nextFiles.length > 3) {
+            syncFileInput();
+            showFileError('選択できるファイルは最大3つまでです。');
+            return false;
+        }
+        for (const file of incomingFiles) {
+            const dotIndex = file.name.lastIndexOf('.');
+            const extension = dotIndex >= 0 ? file.name.slice(dotIndex).toLowerCase() : '';
+            if (!allowedExtensions.includes(extension)) {
+                syncFileInput();
+                showFileError(`次の拡張子のみ投稿可能です: ${allowedExtensions.join(', ')}`);
+                return false;
+            }
+        }
+        selectedFiles = nextFiles;
+        syncFileInput();
+        renderSelectedFiles();
+        postError.textContent = '';
+        postError.hidden = true;
+        return true;
+    }
+
+    fileInput.addEventListener('change', function() {
+        handleSelectedFiles(fileInput.files, fileInput);
+    });
+    cameraInput.addEventListener('change', function() {
+        handleSelectedFiles(cameraInput.files, cameraInput);
+    });
+
+    async function openCamera() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            cameraInput.click();
+            return;
+        }
+
+        try {
+            cameraStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: 'environment' } },
+                audio: true
+            });
+            cameraPreview.srcObject = cameraStream;
+            cameraStatus.textContent = '撮影する内容を確認してください。';
+            cameraDialog.showModal();
+        } catch (error) {
+            cameraStatus.textContent = 'カメラを利用できないため、ファイル選択を開きます。';
+            cameraInput.click();
+        }
+    }
+
+    function closeCamera() {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+        }
+        if (cameraStream) {
+            cameraStream.getTracks().forEach(function(track) {
+                track.stop();
+            });
+            cameraStream = null;
+        }
+        cameraPreview.srcObject = null;
+        recordVideoButton.textContent = '動画を撮影';
+        mediaRecorder = null;
+        recordedChunks = [];
+        if (cameraDialog.open) {
+            cameraDialog.close();
+        }
+    }
+
+    cameraButton.addEventListener('click', openCamera);
+    takePhotoButton.addEventListener('click', function() {
+        if (!cameraStream || !cameraPreview.videoWidth) {
+            return;
+        }
+        cameraCanvas.width = cameraPreview.videoWidth;
+        cameraCanvas.height = cameraPreview.videoHeight;
+        cameraCanvas.getContext('2d').drawImage(
+            cameraPreview, 0, 0, cameraCanvas.width, cameraCanvas.height
+        );
+        cameraCanvas.toBlob(function(blob) {
+            const file = new File([blob], `camera-${Date.now()}.png`, { type: 'image/png' });
+            handleSelectedFiles([file], cameraInput);
+            closeCamera();
+        }, 'image/png');
+    });
+    recordVideoButton.addEventListener('click', function() {
+        if (!cameraStream) {
+            return;
+        }
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+            return;
+        }
+        if (!window.MediaRecorder) {
+            cameraStatus.textContent = 'このブラウザは動画撮影に対応していません。';
+            return;
+        }
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(cameraStream);
+        mediaRecorder.addEventListener('dataavailable', function(event) {
+            if (event.data.size > 0) {
+                recordedChunks.push(event.data);
+            }
+        });
+        mediaRecorder.addEventListener('stop', function() {
+            const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/webm' });
+            const file = new File([blob], `camera-${Date.now()}.webm`, { type: blob.type });
+            handleSelectedFiles([file], cameraInput);
+            closeCamera();
+        });
+        mediaRecorder.start();
+        recordVideoButton.textContent = '動画撮影を停止';
+        cameraStatus.textContent = '動画を撮影中です。もう一度押すと停止します。';
+    });
+    closeCameraDialog.addEventListener('click', closeCamera);
+    cameraDialog.addEventListener('cancel', closeCamera);
+
+    function clearSelectedFile() {
+        form.reset();
+        fileInput.value = '';
+        cameraInput.value = '';
+        selectedFiles = [];
+        renderSelectedFiles();
+        postError.textContent = '';
+        postError.hidden = true;
+        if (previewDialog.open) {
+            previewDialog.close();
+        } else if (previewUrl) {
+            URL.revokeObjectURL(previewUrl);
+            previewUrl = null;
+        }
+    }
+
+    clearButton.addEventListener('click', function() {
+        clearSelectedFile();
+    });
+
+    function openPreview(index) {
+        const file = selectedFiles[index];
+        if (!file) {
+            return;
+        }
+        if (previewUrl) {
+            URL.revokeObjectURL(previewUrl);
+        }
+        previewUrl = URL.createObjectURL(file);
+        previewTitle.textContent = file.name;
+        const isVideo = file.type.startsWith('video/');
+        imagePreview.hidden = isVideo;
+        videoPreview.hidden = !isVideo;
+        if (isVideo) {
+            videoPreview.src = previewUrl;
+        } else {
+            imagePreview.src = previewUrl;
+        }
+        previewDialog.showModal();
+    }
+
+    previewDialog.addEventListener('close', function() {
+        videoPreview.pause();
+        videoPreview.removeAttribute('src');
+        imagePreview.removeAttribute('src');
+        if (previewUrl) {
+            URL.revokeObjectURL(previewUrl);
+            previewUrl = null;
+        }
+    });
+    phoneButton.addEventListener('click', function() {
+        if (typeof phoneDialog.showModal === 'function') {
+            phoneDialog.showModal();
+        } else {
+            window.location.href = 'tel:0170000000';
+        }
+    });
+    closePhoneDialog.addEventListener('click', function() {
+        phoneDialog.close();
+    });
 });
 </script>
 {% endblock %}

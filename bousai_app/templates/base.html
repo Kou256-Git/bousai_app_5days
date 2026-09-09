@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     :root {
+      --font-scale: 1;
       --primary-blue: #d8d8d8;
       --text-blue: #222;
       --button-blue: #dceaf8;
@@ -22,6 +23,7 @@
       color: #222;
       background: var(--page-background);
       font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      font-size: calc(16px * var(--font-scale));
     }
 
     .app-header {
@@ -38,15 +40,20 @@
     .app-title {
       margin: 0;
       color: #222;
-      font-size: 29px;
+      font-size: calc(29px * var(--font-scale));
       font-weight: 400;
+    }
+
+    .app-title a {
+      color: inherit;
+      text-decoration: none;
     }
 
     .header-tools {
       display: flex;
       align-items: center;
       gap: 12px;
-      font-size: 16px;
+      font-size: calc(16px * var(--font-scale));
     }
 
     .main-nav {
@@ -77,7 +84,7 @@
       color: #222;
       background: var(--button-blue);
       border-color: #8998a6;
-      font-size: 20px;
+      font-size: calc(20px * var(--font-scale));
     }
 
     .main-nav a:hover,
@@ -97,7 +104,7 @@
       }
 
       .app-title {
-        font-size: 22px;
+        font-size: calc(22px * var(--font-scale));
       }
 
       .header-tools {
@@ -113,7 +120,7 @@
       }
 
       .header-tools {
-        font-size: 14px;
+        font-size: calc(14px * var(--font-scale));
       }
 
       main {
@@ -125,16 +132,16 @@
 </head>
 <body>
   <header class="app-header">
-    <h1 class="app-title">志賀野市防災アプリ</h1>
+    <h1 class="app-title"><a href="/">防災アプリ</a></h1>
     <div class="header-tools">
       <span>文字サイズ変更</span>
-      <button class="tool-button" type="button">標準</button>
-      <button class="tool-button" type="button"><strong>拡大</strong></button>
+      <button id="font-size-standard" class="tool-button" type="button" aria-pressed="true">標準</button>
+      <button id="font-size-large" class="tool-button" type="button" aria-pressed="false"><strong>拡大</strong></button>
       {% if session.logged_in %}
         <a class="tool-button" href="/logout">ログアウト</a>
         <span>ログイン中</span>
       {% else %}
-        <a class="tool-button" href="/login">ログイン</a>
+        <a class="tool-button" href="{{ url_for('login', next=request.full_path) }}">ログイン</a>
         <span>未ログイン</span>
       {% endif %}
     </div>
@@ -142,12 +149,38 @@
 
   <nav id="main-nav" class="main-nav">
     <a href="/shelter_search">避難所検索へ</a>
-    <a href="/shelter_register">避難所登録</a>
-    <a href="/board">指示・発信ボード</a>
+    {% if session.logged_in %}
+      <a href="/shelter_register">避難所登録</a>
+      <a href="/board">指示・発信ボード</a>
+    {% endif %}
   </nav>
 
   <main>
     {% block content %}{% endblock %}
   </main>
+
+  <script>
+    (function() {
+      const standardButton = document.getElementById('font-size-standard');
+      const largeButton = document.getElementById('font-size-large');
+      const savedSize = localStorage.getItem('fontSize') === 'large' ? 'large' : 'standard';
+
+      function applyFontSize(size) {
+        const isLarge = size === 'large';
+        document.documentElement.style.setProperty('--font-scale', isLarge ? '1.2' : '1');
+        standardButton.setAttribute('aria-pressed', String(!isLarge));
+        largeButton.setAttribute('aria-pressed', String(isLarge));
+        localStorage.setItem('fontSize', size);
+      }
+
+      standardButton.addEventListener('click', function() {
+        applyFontSize('standard');
+      });
+      largeButton.addEventListener('click', function() {
+        applyFontSize('large');
+      });
+      applyFontSize(savedSize);
+    })();
+  </script>
 </body>
 </html>

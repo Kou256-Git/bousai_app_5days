@@ -34,9 +34,10 @@ AREA_NAME = "青森市"
 AREA_CODE = "0220100"
 
 WARNING_URL = (
-    f"https://www.jma.go.jp/bosai/warning/data/r8/{PREFECTURE_CODE}.json"
+    f"https://www.jma.go.jp/bosai/warning/data/risk/{PREFECTURE_CODE}.json"
 )
 TSUNAMI_URL = "https://www.jma.go.jp/bosai/tsunami/data/list.json"
+JMA_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; BousaiApp/1.0)"}
 
 JST = timezone(timedelta(hours=9))
 
@@ -164,10 +165,41 @@ def filter_shelters(district=None):
     return [s for s in shelters if not district or s.get('district') == district]
 
 
+def fetch_jma_json(url):
+    """気象庁のJSONデータを取得する"""
+    request = urllib.request.Request(url, headers=JMA_HEADERS)
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read())
+
+
 def parse_area_warnings(warning_data):
-    """気象庁の新形式JSONから対象市区町村の発表・継続中の情報を抽出する"""
+    """気象庁の警報JSONから対象市区町村の発表・継続中の情報を抽出する"""
+    if isinstance(warning_data, dict):
+        area = next(
+            (
+                area for area_type in warning_data.get("areaTypes", [])
+                for area in area_type.get("areas", [])
+                if isinstance(area, dict) and area.get("code") == AREA_CODE
+            ),
+            None
+        )
+        warnings = [
+            {
+                "name": WARNING_CODES.get(
+                    warning.get("code", ""),
+                    f"不明な警報・注意報 (コード: {warning.get('code', '')})"
+                ),
+                "code": warning.get("code", ""),
+                "status": warning.get("status", "")
+            }
+            for warning in (area.get("warnings", []) if area else [])
+            if isinstance(warning, dict)
+            and warning.get("status") in ("発表", "継続")
+        ]
+        return warnings, warning_data.get("reportDatetime", "")
+
     if not isinstance(warning_data, list):
-        raise ValueError("気象庁の警報・注意報データが新形式の配列ではありません")
+        raise ValueError("気象庁の警報・注意報データの形式が不正です")
 
     warnings = []
     seen_codes = set()
@@ -235,8 +267,7 @@ def get_weather_warnings():
     """対象市区町村の警報・注意報を取得する"""
     try:
         # 青森県の新形式（令和8年～）警報・注意報データを取得
-        with urllib.request.urlopen(url=WARNING_URL, timeout=10) as res:
-            warning_data = json.loads(res.read())
+        warning_data = fetch_jma_json(WARNING_URL)
 
         warnings, report_datetime = parse_area_warnings(warning_data)
 
@@ -268,8 +299,7 @@ def get_disaster_info(category):
     """選択された災害カテゴリの公開情報を返す"""
     if category == "tsunami":
         try:
-            with urllib.request.urlopen(url=TSUNAMI_URL, timeout=10) as res:
-                tsunami_data = json.loads(res.read())
+            tsunami_data = fetch_jma_json(TSUNAMI_URL)
             active_items = tsunami_data if isinstance(tsunami_data, list) else []
             return {
                 "category": category,
@@ -300,7 +330,7 @@ def get_disaster_info(category):
             "message": (
                 "気象庁の警報・注意報を取得できませんでした。"
                 if not available else
-                "該当する警報・注意報はありません。"
+                "該当する警報・注意報は発表されていません。"
                 if not items else
                 "該当する警報・注意報があります。"
             )

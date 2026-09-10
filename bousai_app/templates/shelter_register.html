@@ -18,7 +18,19 @@
   .message { padding: 10px; border: 1px solid; }
   .message.error { color: #900; background: #fff0f0; border-color: #c00; }
   .message.success { color: #064; background: #effaf2; border-color: #18794e; }
+  .status-badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-weight: 600; }
+  .crowd-空いている { color: #064; background: #d9f5df; }
+  .crowd-やや混雑 { color: #795500; background: #fff1bd; }
+  .crowd-混雑, .crowd-満員 { color: #900; background: #ffd9d9; }
+  .crowd-不明 { color: #555; background: #eee; }
+  .management-panel { margin-top: 28px; padding: 16px; border: 1px solid var(--line-color); }
+  .management-panel form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  .management-panel label { display: grid; gap: 4px; }
+  .management-panel select, .management-panel input { min-height: 38px; padding: 6px; font: inherit; }
+  .danger-button { color: #900; background: #fff0f0; border-color: #c00; }
+  .hazard-list li { margin: 8px 0; }
   #registerMap { height: 280px; margin-top: 16px; border: 1px solid var(--line-color); }
+  #hazardMap { height: 280px; margin-top: 16px; border: 1px solid var(--line-color); }
   .registered-list { margin-top: 28px; }
   .registered-list li { margin: 12px 0; padding: 12px; border: 1px solid var(--line-color); }
   .registered-list img, .registered-list video { display: block; max-width: 180px; max-height: 100px; margin-top: 8px; }
@@ -29,7 +41,15 @@
 {% if error %}<p class="message error">{{ message }}</p>{% endif %}
 
 <form class="register-form" method="POST" enctype="multipart/form-data">
+  <input type="hidden" name="action" value="register">
   <input type="hidden" name="edit_id" value="{{ form_data.id or '' }}">
+  <div class="field">
+    <label for="master_id">登録する施設マスター</label>
+    <select id="master_id" name="master_id">
+      <option value="">新しい施設情報を入力</option>
+      {% for master in shelters %}<option value="{{ master.id }}"{% if form_data.id|string == master.id|string %} selected{% endif %}>{{ master.name or '名称未設定' }}{% if master.address %}（{{ master.address }}）{% endif %}</option>{% endfor %}
+    </select>
+  </div>
   <div class="field">
     <label for="name">避難所名（必須）</label>
     <input type="text" id="name" name="name" value="{{ form_data.name or '' }}" required>
@@ -54,8 +74,37 @@
     <label><input type="checkbox" name="toilet"{% if 'toilet' in current_amenities %} checked{% endif %}> トイレ</label>
     <label><input type="checkbox" name="wheelchair"{% if 'wheelchair' in current_amenities %} checked{% endif %}> 車いす対応</label>
   </fieldset>
+  <div class="field">
+    <label for="crowd_status">混雑状況</label>
+    <select id="crowd_status" name="crowd_status">
+      {% for status in crowd_statuses %}<option value="{{ status }}"{% if (form_data.crowd_status or '不明') == status %} selected{% endif %}>{{ status }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="response_status">避難所の対応状況</label>
+    <select id="response_status" name="response_status">
+      {% for status in response_statuses %}<option value="{{ status }}"{% if (form_data.response_status or '受入可能') == status %} selected{% endif %}>{{ status }}</option>{% endfor %}
+    </select>
+  </div>
   <div class="form-actions"><button type="submit">{{ '変更を保存' if editing else '登録' }}</button></div>
 </form>
+
+<section class="management-panel">
+  <h3>登録済み避難所の状態変更</h3>
+  <form method="POST">
+    <input type="hidden" name="action" value="status_update">
+    <label>避難所
+      <select name="status_shelter_id" required>{% for shelter in shelters %}<option value="{{ shelter.id }}">{{ shelter.name or '名称未設定' }}</option>{% endfor %}</select>
+    </label>
+    <label>混雑状況
+      <select name="crowd_status">{% for status in crowd_statuses %}<option value="{{ status }}">{{ status }}</option>{% endfor %}</select>
+    </label>
+    <label>対応状況
+      <select name="response_status">{% for status in response_statuses %}<option value="{{ status }}">{{ status }}</option>{% endfor %}</select>
+    </label>
+    <button type="submit">混雑状況を変更</button>
+  </form>
+</section>
 
 <h3>登録住所の位置</h3>
 {% if registered or editing %}<div id="registerMap" aria-label="登録住所の地図"></div>{% else %}<p id="registerMapPlaceholder">登録後に地図が表示されます</p>{% endif %}
@@ -69,15 +118,35 @@
       <strong>{{ shelter.name or '名称未設定' }}</strong><br>
       住所: {{ shelter.address or '未設定' }}<br>
       詳細: {{ shelter.description or 'なし' }}<br>
+      混雑状況: <span class="status-badge crowd-{{ shelter.get('crowd_status', '不明') }}">{{ shelter.get('crowd_status', '不明') }}</span><br>
+      対応状況: {{ shelter.get('response_status', '受入可能') }}<br>
       設備: {{ shelter.amenities|join('、') if shelter.amenities else 'なし' }}
       {% if shelter.image_url %}
         {% if shelter.image_url.endswith(('.mp4', '.mov', '.webm')) %}<video src="{{ shelter.image_url }}" controls preload="metadata"></video>{% else %}<img src="{{ shelter.image_url }}" alt="{{ shelter.name }}の登録画像">{% endif %}
       {% endif %}
       <p><a href="{{ url_for('shelter_register', edit_id=shelter.id) }}">編集</a></p>
+      <form method="POST" onsubmit="return confirm('この避難所を削除しますか？');">
+        <input type="hidden" name="action" value="delete_shelter">
+        <input type="hidden" name="delete_shelter_id" value="{{ shelter.id }}">
+        <button class="danger-button" type="submit">避難所を削除</button>
+      </form>
     </li>
     {% endfor %}
   </ul>
   {% else %}<p>登録済みの避難所はありません。</p>{% endif %}
+</section>
+
+<section class="management-panel">
+  <h3>危険箇所の地図登録</h3>
+  <p>危険箇所名と住所を入力すると、Nominatimで位置を取得して地図へ表示します。</p>
+  <form method="POST">
+    <input type="hidden" name="action" value="add_hazard">
+    <label>危険箇所名<input type="text" name="hazard_name" required></label>
+    <label>住所<input type="text" name="hazard_address" required></label>
+    <button type="submit">危険箇所を登録</button>
+  </form>
+  {% if hazards %}<ul class="hazard-list">{% for hazard in hazards %}<li>{{ hazard.name }}（{{ hazard.address }}） <form method="POST" style="display:inline" onsubmit="return confirm('この危険箇所を削除しますか？');"><input type="hidden" name="action" value="delete_hazard"><input type="hidden" name="delete_hazard_id" value="{{ hazard.id }}"><button class="danger-button" type="submit">削除</button></form></li>{% endfor %}</ul>{% endif %}
+  <div id="hazardMap" aria-label="危険箇所の地図"></div>
 </section>
 
 {% if registered or editing %}
@@ -95,4 +164,25 @@
   })();
 </script>
 {% endif %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+  (() => {
+    const master = document.getElementById('master_id');
+    const records = {{ shelters|tojson }};
+    const name = document.getElementById('name');
+    const address = document.getElementById('address');
+    master.addEventListener('change', () => {
+      const selected = records.find((item) => String(item.id) === master.value);
+      if (!selected) return;
+      name.value = selected.name || '';
+      address.value = selected.address || '';
+    });
+    const hazards = {{ hazards|tojson }};
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+    const map = L.map('hazardMap').setView([40.8246, 140.7400], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+    hazards.filter((item) => Number.isFinite(item.latitude) && Number.isFinite(item.longitude)).forEach((item) => L.circleMarker([item.latitude, item.longitude], { color: '#b00', fillColor: '#e33', fillOpacity: .8 }).addTo(map).bindPopup(escapeHtml(item.name)));
+  })();
+</script>
 {% endblock %}

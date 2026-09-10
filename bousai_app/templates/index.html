@@ -34,6 +34,18 @@
     </section>
 
     <section class="right-column">
+        {% if resident_notices %}
+        <section class="notice-history" aria-labelledby="notice-history-heading">
+            <h2 id="notice-history-heading" class="panel-heading">住民向け発信</h2>
+            {% for notice in resident_notices[:5] %}
+            <article class="notice-item">
+                <h3>{{ notice.get('subject', '防災情報') }}</h3>
+                <p>{{ notice.get('content', '') }}</p>
+                <small>{{ notice.get('district', '全域') }} / {{ notice.get('created_at', '') }}</small>
+            </article>
+            {% endfor %}
+        </section>
+        {% endif %}
         <div class="map-tools">
             <label class="visually-hidden" for="disasterType">地図に表示する災害情報</label>
             <select id="disasterType" class="select-box">
@@ -99,6 +111,10 @@
 
 <style>
     .home-layout { display: grid; grid-template-columns: minmax(0, 793px) minmax(0, 1fr); gap: 32px; }
+    .notice-history { margin-bottom: 18px; }
+    .notice-history .panel-heading { margin-top: 8px; }
+    .notice-item { margin: 8px 0; padding: 10px; border: 1px solid var(--line-color); background: #fffdf0; }
+    .notice-item h3, .notice-item p { margin: 0 0 5px; }
     .post-heading { margin-top: 8px; }
     .panel-heading { margin: 25px 0 18px 4px; font-size: calc(36px * var(--font-scale)); }
     .post-layout { display: grid; grid-template-columns: minmax(0, 1.24fr) minmax(0, 1fr); gap: 30px; align-items: stretch; }

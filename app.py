@@ -99,9 +99,14 @@ INSTRUCTIONS_FILE = os.path.join(APP_DIR, 'data', 'instructions.json')
 UPLOAD_DIR = os.path.join(APP_DIR, 'uploads')
 SHELTER_UPLOAD_DIR = os.path.join(APP_DIR, 'static', 'uploads')
 POSTS_FILE = os.path.join(APP_DIR, 'data', 'damage_posts.json')
+HAZARDS_FILE = os.path.join(APP_DIR, 'data', 'shelter_hazards.json')
 NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'
 NOMINATIM_HEADERS = {'User-Agent': 'BousaiApp/1.0 (shelter registration)'}
 SHELTER_MEDIA_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.webm'}
+CROWD_STATUSES = ('空いている', 'やや混雑', '混雑', '満員', '不明')
+RESPONSE_STATUSES = ('対応中', '受入可能', '受入停止', '閉鎖', '不明')
+BOARD_DISTRICTS = ('北部', '中央（1）', '中央（2）', '東部', '南部', '浪岡地区', '全域')
+BOARD_TARGETS = ('住民', '職員', '全員')
 
 ALLOWED_UPLOAD_EXTENSIONS = {
     '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic',
@@ -176,6 +181,8 @@ def normalize_shelter(raw, fallback_id):
         'description': str(raw.get('description', '') or ''),
         'amenities': raw.get('amenities', []) if isinstance(raw.get('amenities', []), list) else [],
         'image_url': str(raw.get('image_url', '') or ''),
+        'crowd_status': raw.get('crowd_status', '不明') if raw.get('crowd_status') in CROWD_STATUSES else '不明',
+        'response_status': raw.get('response_status', '受入可能') if raw.get('response_status') in RESPONSE_STATUSES else '受入可能',
     }
     for field in CSV_FIELDS[5:]:
         if field in raw:
@@ -241,6 +248,17 @@ def geocode_shelter_address(address):
 shelters = load_shelters()
 instructions = load_json(INSTRUCTIONS_FILE, [])
 damage_posts = load_json(POSTS_FILE, [])
+hazards = load_json(HAZARDS_FILE, [])
+
+
+def save_shelters():
+    with open(DATA_FILE, 'w', encoding='utf-8') as shelter_file:
+        json.dump(shelters, shelter_file, ensure_ascii=False, indent=2)
+
+
+def save_hazards():
+    with open(HAZARDS_FILE, 'w', encoding='utf-8') as hazard_file:
+        json.dump(hazards, hazard_file, ensure_ascii=False, indent=2)
 
 def save_instructions():
     """指示ボードのデータをファイルに保存する"""
@@ -487,7 +505,7 @@ def get_disaster_info(category):
 # トップページ：templates/index.html を返す（住民向け指示も表示する）
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    resident_notices = [i for i in instructions if i.get('target') == '住民']
+    resident_notices = [i for i in instructions if i.get('target') in ('住民', '全員') and i.get('status') == '発信中']
     if request.method == 'POST':
         uploaded_files = [
             uploaded_file for uploaded_file in request.files.getlist('attachment')
@@ -594,11 +612,66 @@ def logout():
 def shelter_register():
     def render_register(**context):
         context.setdefault('shelters', shelters)
+        context.setdefault('hazards', hazards)
+        context.setdefault('crowd_statuses', CROWD_STATUSES)
+        context.setdefault('response_statuses', RESPONSE_STATUSES)
         context.setdefault('form_data', {})
         return render_template('shelter_register.html', **context)
 
     if request.method == 'POST':
+        action = request.form.get('action', 'register')
+        if action == 'status_update':
+            shelter_id = request.form.get('status_shelter_id', '').strip()
+            target = next((item for item in shelters if str(item.get('id')) == shelter_id), None)
+            crowd_status = request.form.get('crowd_status', '')
+            response_status = request.form.get('response_status', '')
+            if not target or crowd_status not in CROWD_STATUSES or response_status not in RESPONSE_STATUSES:
+                return render_register(error=True, message='避難所または状態の値が不正です。')
+            target['crowd_status'] = crowd_status
+            target['response_status'] = response_status
+            save_shelters()
+            return render_register(success=True, message=f'「{target.get("name", "避難所")}」の状態を更新しました。')
+
+        if action == 'delete_shelter':
+            shelter_id = request.form.get('delete_shelter_id', '').strip()
+            target = next((item for item in shelters if str(item.get('id')) == shelter_id), None)
+            if not target:
+                return render_register(error=True, message='削除対象の避難所が見つかりません。')
+            shelters.remove(target)
+            save_shelters()
+            return render_register(success=True, message=f'「{target.get("name", "避難所")}」を削除しました。')
+
+        if action == 'add_hazard':
+            hazard_name = request.form.get('hazard_name', '').strip()
+            hazard_address = normalize_address(request.form.get('hazard_address', ''))
+            if not hazard_name or not hazard_address:
+                return render_register(error=True, message='危険箇所名と住所は必須です。')
+            try:
+                latitude, longitude = geocode_shelter_address(hazard_address)
+            except (ValueError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+                return render_register(error=True, message='危険箇所の住所を地図上で検索できませんでした。')
+            numeric_ids = [int(item.get('id')) for item in hazards if str(item.get('id', '')).isdigit()]
+            hazards.insert(0, {
+                'id': max(numeric_ids, default=0) + 1,
+                'name': hazard_name,
+                'address': hazard_address,
+                'latitude': latitude,
+                'longitude': longitude,
+            })
+            save_hazards()
+            return render_register(success=True, message=f'危険箇所「{hazard_name}」を登録しました。')
+
+        if action == 'delete_hazard':
+            hazard_id = request.form.get('delete_hazard_id', '').strip()
+            target = next((item for item in hazards if str(item.get('id')) == hazard_id), None)
+            if not target:
+                return render_register(error=True, message='削除対象の危険箇所が見つかりません。')
+            hazards.remove(target)
+            save_hazards()
+            return render_register(success=True, message=f'危険箇所「{target.get("name", "")}"を削除しました。')
+
         edit_id = request.form.get('edit_id', '').strip()
+        master_id = request.form.get('master_id', '').strip()
         name = request.form.get('name', '').strip()
         address = normalize_address(request.form.get('address', ''))
         description = request.form.get('description', '').strip()
@@ -611,6 +684,21 @@ def shelter_register():
             return render_register(error=True, message='避難所名と住所は必須です。', form_data=form_data)
 
         existing = next((item for item in shelters if str(item.get('id')) == edit_id), None) if edit_id else None
+        if not existing and master_id:
+            existing = next((item for item in shelters if str(item.get('id')) == master_id), None)
+            if existing:
+                edit_id = master_id
+        if not existing:
+            existing = next(
+                (
+                    item for item in shelters
+                    if normalize_address(item.get('address', '')) == address
+                    and item.get('name', '').strip() == name
+                ),
+                None,
+            )
+            if existing:
+                edit_id = str(existing.get('id'))
         uploaded = request.files.get('image')
         extension = os.path.splitext(uploaded.filename or '')[1].lower() if uploaded else ''
         if extension and extension not in SHELTER_MEDIA_EXTENSIONS:
@@ -650,14 +738,15 @@ def shelter_register():
             'lat': latitude,
             'lng': longitude,
             'image_url': image_url,
+            'crowd_status': request.form.get('crowd_status') if request.form.get('crowd_status') in CROWD_STATUSES else (existing or {}).get('crowd_status', '不明'),
+            'response_status': request.form.get('response_status') if request.form.get('response_status') in RESPONSE_STATUSES else (existing or {}).get('response_status', '受入可能'),
         }
         if existing:
             shelter_index = shelters.index(existing)
             shelters[shelter_index] = shelter
         else:
             shelters.insert(0, shelter)
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(shelters, f, ensure_ascii=False, indent=2)
+        save_shelters()
 
         return render_register(success=True, message=f'「{name}」を登録しました。', registered=shelter)
 
@@ -679,11 +768,62 @@ def all_shelters():
 
 
 # 指示ボード：住民向けの指示を一覧で確認する
-@app.route('/board')
+@app.route('/board', methods=['GET', 'POST'])
 @login_required
 def board():
-    resident_instructions = [i for i in instructions if i.get('target') == '住民']
-    return render_template('board.html', instructions=resident_instructions)
+    def render_board(**context):
+        context.setdefault('instructions', instructions)
+        context.setdefault('board_districts', BOARD_DISTRICTS)
+        context.setdefault('board_targets', BOARD_TARGETS)
+        context.setdefault('form_data', {})
+        context.setdefault('selected_districts', [])
+        return render_template('board.html', **context)
+
+    if request.method == 'POST':
+        action = request.form.get('action', 'create')
+        if action == 'delete':
+            instruction_id = request.form.get('instruction_id', '').strip()
+            target = next((item for item in instructions if str(item.get('id')) == instruction_id), None)
+            if not target:
+                return render_board(error='削除対象の発信が見つかりません。')
+            instructions.remove(target)
+            save_instructions()
+            return redirect(url_for('board'))
+
+        subject = request.form.get('subject', '').strip()
+        content = request.form.get('content', '').strip()
+        target = request.form.get('target', '').strip()
+        selected_districts = [district for district in BOARD_DISTRICTS if district in request.form.getlist('district')]
+        form_data = {'subject': subject, 'content': content, 'target': target}
+        if not subject or not content:
+            return render_board(error='件名と連絡内容を入力してください。', form_data=form_data, selected_districts=selected_districts)
+        if target not in BOARD_TARGETS:
+            return render_board(error='連絡対象を選択してください。', form_data=form_data, selected_districts=selected_districts)
+        if not selected_districts:
+            return render_board(error='地区を1つ以上選択してください。', form_data=form_data, selected_districts=selected_districts)
+        next_id = max((int(item.get('id')) for item in instructions if str(item.get('id', '')).isdigit()), default=0) + 1
+        now = get_japan_time()
+        instructions.insert(0, {
+            'id': next_id,
+            'subject': subject,
+            'content': content,
+            'target': target,
+            'district': '、'.join(selected_districts),
+            'status': '発信中',
+            'created_at': now,
+            'updated_at': now,
+        })
+        save_instructions()
+        return redirect(url_for('board'))
+
+    return render_template(
+        'board.html',
+        instructions=instructions,
+        board_districts=BOARD_DISTRICTS,
+        board_targets=BOARD_TARGETS,
+        form_data={},
+        selected_districts=[],
+    )
 
 # 検索結果ページ：templates/search_results.html を返す
 @app.route('/search_results')

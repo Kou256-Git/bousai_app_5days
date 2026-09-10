@@ -3,23 +3,32 @@
 {% block title %}指示・発信ボード - 防災アプリ{% endblock %}
 
 {% block content %}
-<h2>発信ボード</h2>
-<p>住民向けの発信を登録・確認できます。</p>
-
-<!-- 発信一覧 -->
-<h3>発信一覧</h3>
-{% if instructions %}
-<table border="1" cellpadding="5">
-  <tr>
-    <th>内容</th>
-  </tr>
-  {% for inst in instructions %}
-  <tr>
-    <td>{{ inst.content }}{% if inst.shelter %}（避難先: {{ inst.shelter }}）{% endif %}</td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}
-<p>登録されている指示はありません。</p>
-{% endif %}
+<h2>指示・発信ボード</h2>
+<p>指示・発信を登録・確認できます。</p>
+{% if error %}<p class="board-error" role="alert">{{ error }}</p>{% endif %}
+<form class="board-form" method="POST">
+  <input type="hidden" name="action" value="create">
+  <label for="subject">件名（必須）</label><input id="subject" name="subject" type="text" value="{{ form_data.subject or '' }}" required>
+  <label for="content">連絡内容（必須）</label><textarea id="content" name="content" required>{{ form_data.content or '' }}</textarea>
+  <fieldset><legend>連絡対象（必須）</legend>{% for target in board_targets %}<label class="radio-label"><input type="radio" name="target" value="{{ target }}"{% if form_data.target == target %} checked{% endif %} required> {{ target }}</label>{% endfor %}</fieldset>
+  <fieldset class="district-fieldset"><legend>地区（クリックして選択）</legend><div class="district-actions"><button type="button" id="selectWholeDistrict">全域</button><button type="button" id="selectAllDistricts">全選択</button><button type="button" id="clearDistricts">クリア</button></div>
+    <svg class="district-map" viewBox="0 0 420 430" role="img" aria-label="青森市の地区選択白地図">
+      <g class="district-shape" data-district="北部" tabindex="0" role="button" aria-pressed="false"><path d="M20 20H400V105H20Z"></path><text x="210" y="70">北部</text></g>
+      <g class="district-shape" data-district="中央（1）" tabindex="0" role="button" aria-pressed="false"><path d="M20 115H200V215H20Z"></path><text x="110" y="170">中央（1）</text></g>
+      <g class="district-shape" data-district="中央（2）" tabindex="0" role="button" aria-pressed="false"><path d="M210 115H400V215H210Z"></path><text x="305" y="170">中央（2）</text></g>
+      <g class="district-shape" data-district="東部" tabindex="0" role="button" aria-pressed="false"><path d="M210 225H400V325H210Z"></path><text x="305" y="280">東部</text></g>
+      <g class="district-shape" data-district="南部" tabindex="0" role="button" aria-pressed="false"><path d="M20 225H200V325H20Z"></path><text x="110" y="280">南部</text></g>
+      <g class="district-shape" data-district="浪岡地区" tabindex="0" role="button" aria-pressed="false"><path d="M20 335H400V410H20Z"></path><text x="210" y="380">浪岡地区</text></g>
+    </svg><div id="selectedDistricts" aria-live="polite">選択中: なし</div><div id="districtInputs">{% for district in selected_districts %}<input type="hidden" name="district" value="{{ district }}">{% endfor %}</div>
+  </fieldset><button class="board-submit" type="submit">送信</button>
+</form>
+<h3>送信履歴</h3><div class="history-wrap"><table class="history-table"><thead><tr><th>件名</th><th>本文</th><th>作成日時</th><th>地区</th><th>対象</th><th>状態</th><th>操作</th></tr></thead><tbody>
+{% for inst in instructions[:5] %}<tr><td>{{ inst.get('subject', '指示・発信') }}</td><td>{{ inst.get('content', '') }}</td><td>{{ inst.get('created_at', '') }}</td><td>{{ inst.get('district', '未指定') }}</td><td>{{ inst.get('target', '') }}</td><td>{{ inst.get('status', '不明') }}</td><td><form method="POST" onsubmit="return confirm('この発信を削除しますか？');"><input type="hidden" name="action" value="delete"><input type="hidden" name="instruction_id" value="{{ inst.get('id') }}"><button type="submit">削除</button></form></td></tr>{% else %}<tr><td colspan="7">登録されている発信はありません。</td></tr>{% endfor %}
+</tbody></table></div>
+<style>
+  .board-form { display: grid; gap: 8px; max-width: 800px; }.board-form input[type="text"], .board-form textarea { width: 100%; padding: 10px; border: 1px solid var(--line-color); font: inherit; }.board-form textarea { min-height: 130px; resize: vertical; }.board-form fieldset { margin: 8px 0; border: 1px solid var(--line-color); }.radio-label { margin-right: 18px; }.district-actions { display: flex; gap: 8px; margin-bottom: 6px; }.district-actions button, .history-table button, .board-submit { padding: 8px 16px; color: #222; background: var(--button-blue); border: 1px solid #8998a6; cursor: pointer; }.board-submit { width: max-content; min-width: 140px; }.district-map { display: block; width: min(100%, 420px); height: auto; border: 1px solid var(--line-color); background: #fff; }.district-shape { cursor: pointer; outline: none; }.district-shape path { fill: #f5f5f5; stroke: #555; stroke-width: 2; }.district-shape text { fill: #222; font-size: 16px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }.district-shape:hover path, .district-shape:focus path { fill: #dceaf8; }.district-shape.selected path { fill: #8fc1e8; stroke: #1769aa; stroke-width: 3; }.board-error { padding: 10px; color: #900; border: 1px solid #c00; background: #fff0f0; }.history-wrap { overflow-x: auto; }.history-table { width: 100%; min-width: 760px; border-collapse: collapse; }.history-table th, .history-table td { padding: 8px; border: 1px solid var(--line-color); vertical-align: top; text-align: left; }.history-table th { background: var(--primary-blue); }
+</style>
+<script>
+(() => { const shapes = [...document.querySelectorAll('.district-shape')]; const selected = new Set({{ selected_districts|tojson }}); const status = document.getElementById('selectedDistricts'); const inputs = document.getElementById('districtInputs'); function render() { shapes.forEach((shape) => { const active = selected.has(shape.dataset.district); shape.classList.toggle('selected', active); shape.setAttribute('aria-pressed', String(active)); }); status.textContent = `選択中: ${selected.size ? [...selected].join('、') : 'なし'}`; inputs.innerHTML = [...selected].map((district) => `<input type="hidden" name="district" value="${district.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">`).join(''); } function toggle(shape) { const district = shape.dataset.district; selected.has(district) ? selected.delete(district) : selected.add(district); render(); } shapes.forEach((shape) => { shape.addEventListener('click', () => toggle(shape)); shape.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(shape); } }); }); document.getElementById('selectWholeDistrict').addEventListener('click', () => { selected.clear(); selected.add('全域'); render(); }); document.getElementById('selectAllDistricts').addEventListener('click', () => { selected.clear(); shapes.forEach((shape) => selected.add(shape.dataset.district)); render(); }); document.getElementById('clearDistricts').addEventListener('click', () => { selected.clear(); render(); }); render(); })();
+</script>
 {% endblock %}

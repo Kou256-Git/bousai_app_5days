@@ -1,23 +1,98 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>避難所登録</h2>
-<p>新しい避難所情報を登録します。</p>
+<h2>避難所{{ '編集' if editing else '登録' }}</h2>
+<p>避難所名、住所、画像または動画、詳細情報を登録します。</p>
 
-<!-- 成功・エラーメッセージ表示 -->
-{% if success %}
-  <p>{{ message }}</p>
-{% endif %}
+<style>
+  [hidden] { display: none !important; }
+  .register-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, .8fr); gap: 16px 24px; }
+  .register-form label { display: block; margin-bottom: 6px; font-weight: 600; }
+  .register-form input[type="text"], .register-form textarea { width: 100%; padding: 8px; border: 1px solid var(--line-color); font: inherit; }
+  .register-form textarea { min-height: 130px; resize: vertical; }
+  .media-field { grid-column: 2; grid-row: 1 / span 2; }
+  .details-field { grid-column: 1; }
+  .amenities-field { grid-column: 2; }
+  .amenities-field label { display: inline-block; margin: 8px 18px 8px 0; font-weight: 400; }
+  .form-actions { grid-column: 1 / -1; }
+  .message { padding: 10px; border: 1px solid; }
+  .message.error { color: #900; background: #fff0f0; border-color: #c00; }
+  .message.success { color: #064; background: #effaf2; border-color: #18794e; }
+  #registerMap { height: 280px; margin-top: 16px; border: 1px solid var(--line-color); }
+  .registered-list { margin-top: 28px; }
+  .registered-list li { margin: 12px 0; padding: 12px; border: 1px solid var(--line-color); }
+  .registered-list img, .registered-list video { display: block; max-width: 180px; max-height: 100px; margin-top: 8px; }
+  @media (max-width: 700px) { .register-form { display: block; } .register-form .field { margin-bottom: 16px; } }
+</style>
 
-{% if error %}
-  <p>{{ message }}</p>
-{% endif %}
+{% if success %}<p class="message success">{{ message }}</p>{% endif %}
+{% if error %}<p class="message error">{{ message }}</p>{% endif %}
 
-<form method="POST">
-  <p>
-    <label for="name">避難所名（必須）</label><br>
-    <input type="text" id="name" name="name">
-  </p>
-  <p><button type="submit">登録</button></p>
+<form class="register-form" method="POST" enctype="multipart/form-data">
+  <input type="hidden" name="edit_id" value="{{ form_data.id or '' }}">
+  <div class="field">
+    <label for="name">避難所名（必須）</label>
+    <input type="text" id="name" name="name" value="{{ form_data.name or '' }}" required>
+  </div>
+  <div class="field">
+    <label for="address">住所（必須）</label>
+    <input type="text" id="address" name="address" value="{{ form_data.address or '' }}" placeholder="青森市中央1-1-1" required>
+  </div>
+  <div class="field media-field">
+    <label for="image">画像・動画{{ '' if editing else '（必須）' }}</label>
+    <input type="file" id="image" name="image" accept=".jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.webm"{% if not editing %} required{% endif %}>
+    {% if editing and editing.image_url %}<p>現在のメディア: <a href="{{ editing.image_url }}" target="_blank" rel="noopener noreferrer">表示</a></p>{% endif %}
+  </div>
+  <div class="field details-field">
+    <label for="description">詳細情報</label>
+    <textarea id="description" name="description">{{ form_data.description or '' }}</textarea>
+  </div>
+  <fieldset class="field amenities-field">
+    <legend>設備情報</legend>
+    {% set current_amenities = form_data.amenities or [] %}
+    <label><input type="checkbox" name="pet"{% if 'pet' in current_amenities %} checked{% endif %}> ペット可</label>
+    <label><input type="checkbox" name="toilet"{% if 'toilet' in current_amenities %} checked{% endif %}> トイレ</label>
+    <label><input type="checkbox" name="wheelchair"{% if 'wheelchair' in current_amenities %} checked{% endif %}> 車いす対応</label>
+  </fieldset>
+  <div class="form-actions"><button type="submit">{{ '変更を保存' if editing else '登録' }}</button></div>
 </form>
+
+<h3>登録住所の位置</h3>
+{% if registered or editing %}<div id="registerMap" aria-label="登録住所の地図"></div>{% else %}<p id="registerMapPlaceholder">登録後に地図が表示されます</p>{% endif %}
+
+<section class="registered-list">
+  <h3>登録済み避難所</h3>
+  {% if shelters %}
+  <ul>
+    {% for shelter in shelters %}
+    <li>
+      <strong>{{ shelter.name or '名称未設定' }}</strong><br>
+      住所: {{ shelter.address or '未設定' }}<br>
+      詳細: {{ shelter.description or 'なし' }}<br>
+      設備: {{ shelter.amenities|join('、') if shelter.amenities else 'なし' }}
+      {% if shelter.image_url %}
+        {% if shelter.image_url.endswith(('.mp4', '.mov', '.webm')) %}<video src="{{ shelter.image_url }}" controls preload="metadata"></video>{% else %}<img src="{{ shelter.image_url }}" alt="{{ shelter.name }}の登録画像">{% endif %}
+      {% endif %}
+      <p><a href="{{ url_for('shelter_register', edit_id=shelter.id) }}">編集</a></p>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p>登録済みの避難所はありません。</p>{% endif %}
+</section>
+
+{% if registered or editing %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+  (() => {
+    const shelter = {{ (registered or editing)|tojson }};
+    const position = [shelter.latitude ?? shelter.lat, shelter.longitude ?? shelter.lng];
+    if (!Number.isFinite(position[0]) || !Number.isFinite(position[1])) return;
+    const map = L.map('registerMap').setView(position, 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+    L.marker(position).addTo(map).bindPopup(`<strong>${escapeHtml(shelter.name)}</strong><br>${escapeHtml(shelter.address)}`).openPopup();
+  })();
+</script>
+{% endif %}
 {% endblock %}

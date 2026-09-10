@@ -62,7 +62,9 @@
 		};
 		const popupHtml = (shelter) => {
 			const destination = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${shelter.lat},${shelter.lng}`)}`;
-			return `<div class="shelter-popup"><strong>${escapeHtml(shelter.name || '施設')}</strong><div>地域: ${escapeHtml(shelter.district)}</div><div>地区: ${escapeHtml(shelter.area)}</div><div>住所: ${escapeHtml(shelter.address)}</div><button type="button" data-detail-id="${escapeHtml(shelter.id)}">詳細</button><a href="${destination}" target="_blank" rel="noopener noreferrer">ルート案内</a></div>`;
+			const amenities = Array.isArray(shelter.amenities) && shelter.amenities.length ? shelter.amenities.join('、') : 'なし';
+			const media = shelter.image_url ? `<br><a href="${escapeHtml(shelter.image_url)}" target="_blank" rel="noopener noreferrer">登録メディアを表示</a>` : '';
+			return `<div class="shelter-popup"><strong>${escapeHtml(shelter.name || '施設')}</strong><div>カテゴリ: 避難所</div><div>地域: ${escapeHtml(shelter.district)}</div><div>地区: ${escapeHtml(shelter.area)}</div><div>住所: ${escapeHtml(shelter.address)}</div><div>詳細: ${escapeHtml(shelter.description || 'なし')}</div><div>設備: ${escapeHtml(amenities)}</div>${media}<br><button type="button" data-detail-id="${escapeHtml(shelter.id)}">詳細</button><a href="${destination}" target="_blank" rel="noopener noreferrer">ルート案内</a></div>`;
 		};
 
 		shelters.filter(validPosition).forEach((shelter) => {

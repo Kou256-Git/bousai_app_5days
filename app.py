@@ -6,6 +6,9 @@ import json
 import os
 import csv
 import math
+import unicodedata
+import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -93,7 +96,11 @@ SHELTER_CSV_CANDIDATES = (
 )
 INSTRUCTIONS_FILE = os.path.join(APP_DIR, 'data', 'instructions.json')
 UPLOAD_DIR = os.path.join(APP_DIR, 'uploads')
+SHELTER_UPLOAD_DIR = os.path.join(APP_DIR, 'static', 'uploads')
 POSTS_FILE = os.path.join(APP_DIR, 'data', 'damage_posts.json')
+NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'
+NOMINATIM_HEADERS = {'User-Agent': 'BousaiApp/1.0 (shelter registration)'}
+SHELTER_MEDIA_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.webm'}
 
 ALLOWED_UPLOAD_EXTENSIONS = {
     '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic',
@@ -150,8 +157,8 @@ def valid_aomori_coordinate(lat, lng, region_code=None):
 def normalize_shelter(raw, fallback_id):
     region_code = str(raw.get('地域区分', raw.get('region_code', '')) or '').strip()
     district = REGION_NAMES.get(region_code, '未分類')
-    lat = parse_coordinate(raw.get('lat'))
-    lng = parse_coordinate(raw.get('lng'))
+    lat = parse_coordinate(raw.get('lat', raw.get('latitude')))
+    lng = parse_coordinate(raw.get('lng', raw.get('longitude')))
     if not valid_aomori_coordinate(lat, lng, region_code):
         lat = lng = None
     shelter = {
@@ -163,6 +170,11 @@ def normalize_shelter(raw, fallback_id):
         'address': str(raw.get('所在地', raw.get('address', '')) or '').strip(),
         'lat': lat,
         'lng': lng,
+        'latitude': lat,
+        'longitude': lng,
+        'description': str(raw.get('description', '') or ''),
+        'amenities': raw.get('amenities', []) if isinstance(raw.get('amenities', []), list) else [],
+        'image_url': str(raw.get('image_url', '') or ''),
     }
     for field in CSV_FIELDS[5:]:
         if field in raw:
@@ -183,6 +195,28 @@ def load_shelters():
                 if row.get('施設名称')
             ]
     return [normalize_shelter(row, index) for index, row in enumerate(load_json(DATA_FILE, []), start=1)]
+
+
+def normalize_address(address):
+    """全角数字・ハイフン等をNominatimで扱いやすい表記へそろえる。"""
+    return unicodedata.normalize('NFKC', address).replace('ー', '-').strip()
+
+
+def geocode_shelter_address(address):
+    """Nominatimで青森市の住所を検索し、安全な座標だけを返す。"""
+    query = f'青森市 {address}'
+    params = urllib.parse.urlencode({'q': query, 'format': 'jsonv2', 'limit': 1, 'countrycodes': 'jp'})
+    geocode_request = urllib.request.Request(f'{NOMINATIM_URL}?{params}', headers=NOMINATIM_HEADERS)
+    with urllib.request.urlopen(geocode_request, timeout=10) as response:
+        results = json.loads(response.read())
+    if not results:
+        raise ValueError('住所を地図上で検索できませんでした。番地を含む住所を確認してください。')
+    result = results[0]
+    lat = parse_coordinate(result.get('lat'))
+    lng = parse_coordinate(result.get('lon'))
+    if not valid_aomori_coordinate(lat, lng):
+        raise ValueError('検索結果が青森市の許容範囲外でした。住所を確認してください。')
+    return lat, lng
 
 
 shelters = load_shelters()
@@ -539,28 +573,75 @@ def logout():
 @app.route('/shelter_register', methods=['GET', 'POST'])
 @login_required
 def shelter_register():
-    if request.method == 'POST':
-        name = request.form.get('name', '').strip()
-        if not name:
-            return render_template(
-                'shelter_register.html',
-                error=True,
-                message='避難所名を入力してください。'
-            )
+    def render_register(**context):
+        context.setdefault('shelters', shelters)
+        context.setdefault('form_data', {})
+        return render_template('shelter_register.html', **context)
 
-        next_id = max((shelter.get('id', 0) for shelter in shelters), default=0) + 1
-        shelter = {'id': next_id, 'name': name}
-        shelters.append(shelter)
+    if request.method == 'POST':
+        edit_id = request.form.get('edit_id', '').strip()
+        name = request.form.get('name', '').strip()
+        address = normalize_address(request.form.get('address', ''))
+        description = request.form.get('description', '').strip()
+        amenities = [item for item in ('pet', 'toilet', 'wheelchair') if request.form.get(item) == 'on']
+        form_data = {
+            'id': edit_id, 'name': name, 'address': address,
+            'description': description, 'amenities': amenities,
+        }
+        if not name or not address:
+            return render_register(error=True, message='避難所名と住所は必須です。', form_data=form_data)
+
+        existing = next((item for item in shelters if str(item.get('id')) == edit_id), None) if edit_id else None
+        uploaded = request.files.get('image')
+        extension = os.path.splitext(uploaded.filename or '')[1].lower() if uploaded else ''
+        if extension and extension not in SHELTER_MEDIA_EXTENSIONS:
+            return render_register(error=True, message='画像・動画は jpg、jpeg、png、gif、webp、mp4、mov、webm のみ登録できます。', form_data=form_data)
+        if not existing and (not uploaded or not uploaded.filename):
+            return render_register(error=True, message='画像または動画を選択してください。', form_data=form_data)
+
+        try:
+            latitude, longitude = geocode_shelter_address(address)
+        except (ValueError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            return render_register(error=True, message='住所から地図位置を取得できませんでした。住所を確認して再度お試しください。', form_data=form_data)
+
+        if existing:
+            shelter_id = existing.get('id')
+            image_url = existing.get('image_url', '')
+        else:
+            numeric_ids = [int(item.get('id')) for item in shelters if str(item.get('id', '')).isdigit()]
+            shelter_id = max(numeric_ids, default=0) + 1
+            image_url = ''
+        if uploaded and uploaded.filename:
+            os.makedirs(SHELTER_UPLOAD_DIR, exist_ok=True)
+            stored_name = f'{shelter_id}_shelter_{uuid.uuid4().hex[:8]}{extension}'
+            uploaded.save(os.path.join(SHELTER_UPLOAD_DIR, stored_name))
+            image_url = url_for('static', filename=f'uploads/{stored_name}')
+
+        shelter = {
+            'id': shelter_id,
+            'name': name,
+            'address': address,
+            'description': description,
+            'amenities': amenities,
+            'latitude': latitude,
+            'longitude': longitude,
+            'lat': latitude,
+            'lng': longitude,
+            'image_url': image_url,
+        }
+        if existing:
+            shelter_index = shelters.index(existing)
+            shelters[shelter_index] = shelter
+        else:
+            shelters.insert(0, shelter)
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(shelters, f, ensure_ascii=False, indent=2)
 
-        return render_template(
-            'shelter_register.html',
-            success=True,
-            message=f'「{name}」を登録しました。'
-        )
+        return render_register(success=True, message=f'「{name}」を登録しました。', registered=shelter)
 
-    return render_template('shelter_register.html')
+    edit_id = request.args.get('edit_id', '').strip()
+    editing = next((item for item in shelters if str(item.get('id')) == edit_id), None)
+    return render_register(editing=editing, form_data=editing or {})
 
 # 避難所検索ページ
 @app.route('/shelter_search')

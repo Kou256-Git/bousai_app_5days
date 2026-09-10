@@ -49,6 +49,17 @@
       text-decoration: none;
     }
 
+    .menu-toggle {
+      display: none;
+      min-width: 44px;
+      min-height: 44px;
+      margin-left: 10px;
+      color: #222;
+      background: var(--button-blue);
+      border: 1px solid #8998a6;
+      font-size: 24px;
+    }
+
     .header-tools {
       display: flex;
       align-items: center;
@@ -107,6 +118,8 @@
         font-size: calc(22px * var(--font-scale));
       }
 
+      .menu-toggle { display: inline-block; vertical-align: middle; }
+
       .header-tools {
         display: block;
         margin-top: 10px;
@@ -127,12 +140,17 @@
         width: min(100% - 20px, 1280px);
         margin-top: 10px;
       }
+
+      .main-nav.is-collapsed { display: none; }
     }
   </style>
 </head>
 <body>
   <header class="app-header">
-    <h1 class="app-title"><a href="/">防災アプリ</a></h1>
+    <div>
+      <h1 class="app-title"><a href="/">防災アプリ</a></h1>
+      <button id="menu-toggle" class="menu-toggle" type="button" aria-label="メニューを開閉" aria-expanded="true">&#9776;</button>
+    </div>
     <div class="header-tools">
       <span>文字サイズ変更</span>
       <button id="font-size-standard" class="tool-button" type="button" aria-pressed="true">標準</button>
@@ -180,6 +198,17 @@
         applyFontSize('large');
       });
       applyFontSize(savedSize);
+    })();
+  </script>
+  <script>
+    (function() {
+      const toggle = document.getElementById('menu-toggle');
+      const nav = document.getElementById('main-nav');
+      if (!toggle || !nav) return;
+      toggle.addEventListener('click', function() {
+        const collapsed = nav.classList.toggle('is-collapsed');
+        toggle.setAttribute('aria-expanded', String(!collapsed));
+      });
     })();
   </script>
 </body>

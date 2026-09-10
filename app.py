@@ -6,6 +6,7 @@ import json
 import os
 import csv
 import math
+import re
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -199,24 +200,42 @@ def load_shelters():
 
 def normalize_address(address):
     """全角数字・ハイフン等をNominatimで扱いやすい表記へそろえる。"""
-    return unicodedata.normalize('NFKC', address).replace('ー', '-').strip()
+    normalized = unicodedata.normalize('NFKC', address).strip()
+    for separator in ('−', '－', '―', 'ー', '‐', '‑', '﹣', '–', '—'):
+        normalized = normalized.replace(separator, '-')
+    return normalized
 
 
 def geocode_shelter_address(address):
     """Nominatimで青森市の住所を検索し、安全な座標だけを返す。"""
-    query = f'青森市 {address}'
-    params = urllib.parse.urlencode({'q': query, 'format': 'jsonv2', 'limit': 1, 'countrycodes': 'jp'})
-    geocode_request = urllib.request.Request(f'{NOMINATIM_URL}?{params}', headers=NOMINATIM_HEADERS)
-    with urllib.request.urlopen(geocode_request, timeout=10) as response:
-        results = json.loads(response.read())
-    if not results:
-        raise ValueError('住所を地図上で検索できませんでした。番地を含む住所を確認してください。')
-    result = results[0]
-    lat = parse_coordinate(result.get('lat'))
-    lng = parse_coordinate(result.get('lon'))
-    if not valid_aomori_coordinate(lat, lng):
-        raise ValueError('検索結果が青森市の許容範囲外でした。住所を確認してください。')
-    return lat, lng
+    normalized = normalize_address(address)
+    queries = [normalized]
+    # 番地単位のデータがない場合は、町丁目の代表座標を使う。
+    block_query = re.sub(r'(\d+丁目)\d+(?:-\d+)?$', r'\1', normalized)
+    block_query = re.sub(r'([町字])\d+(?:-\d+)?$', r'\1', block_query)
+    if block_query != normalized:
+        queries.append(block_query)
+    for query in queries:
+        search_query = query if '青森市' in query else f'青森市 {query}'
+        params = urllib.parse.urlencode({
+            'q': search_query,
+            'format': 'jsonv2',
+            'limit': 5,
+            'countrycodes': 'jp',
+            'viewbox': '140.55,41.0,140.95,40.55',
+            'bounded': 1,
+        })
+        geocode_request = urllib.request.Request(f'{NOMINATIM_URL}?{params}', headers=NOMINATIM_HEADERS)
+        with urllib.request.urlopen(geocode_request, timeout=10) as response:
+            results = json.loads(response.read())
+        result = next((item for item in results if '青森市' in item.get('display_name', '')), None)
+        if not result:
+            continue
+        lat = parse_coordinate(result.get('lat'))
+        lng = parse_coordinate(result.get('lon'))
+        if valid_aomori_coordinate(lat, lng):
+            return lat, lng
+    raise ValueError('住所を地図上で検索できませんでした。市区町村・町名・番地を確認してください。')
 
 
 shelters = load_shelters()
@@ -620,6 +639,9 @@ def shelter_register():
         shelter = {
             'id': shelter_id,
             'name': name,
+            'district': existing.get('district', '未分類') if existing else '未分類',
+            'region_code': existing.get('region_code', '') if existing else '',
+            'area': existing.get('area', '') if existing else '',
             'address': address,
             'description': description,
             'amenities': amenities,
@@ -646,8 +668,8 @@ def shelter_register():
 # 避難所検索ページ
 @app.route('/shelter_search')
 def shelter_search():
-    districts = sorted({s['district'] for s in shelters if s.get('district') != '未分類'})
-    areas = sorted({s['area'] for s in shelters if s.get('area')})
+    districts = sorted({s.get('district', '未分類') for s in shelters if s.get('district') != '未分類'})
+    areas = sorted({s.get('area', '') for s in shelters if s.get('area')})
     return render_template('shelter_search.html', shelters=shelters, districts=districts, areas=areas)
 
 # 全施設一覧ページ

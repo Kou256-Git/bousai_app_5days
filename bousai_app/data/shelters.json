@@ -1,18 +1,59 @@
 [
   {
     "id": 1,
-    "name": "御所見小学校"
+    "name": "御所見小学校",
+    "address": "青森県青森市中央1丁目22-5",
+    "description": "",
+    "amenities": [],
+    "latitude": 40.8214862,
+    "longitude": 140.7479873,
+    "lat": 40.8214862,
+    "lng": 140.7479873,
+    "image_url": ""
   },
   {
     "id": 2,
-    "name": "片瀬小学校"
+    "name": "片瀬小学校",
+    "district": "未分類",
+    "region_code": "",
+    "area": "",
+    "address": "",
+    "lat": null,
+    "lng": null,
+    "latitude": null,
+    "longitude": null,
+    "description": "",
+    "amenities": [],
+    "image_url": ""
   },
   {
     "id": 5,
-    "name": "鵠洋小学校"
+    "name": "鵠洋小学校",
+    "district": "未分類",
+    "region_code": "",
+    "area": "",
+    "address": "",
+    "lat": null,
+    "lng": null,
+    "latitude": null,
+    "longitude": null,
+    "description": "",
+    "amenities": [],
+    "image_url": ""
   },
   {
     "id": 6,
-    "name": "あああ"
+    "name": "あああ",
+    "district": "未分類",
+    "region_code": "",
+    "area": "",
+    "address": "",
+    "lat": null,
+    "lng": null,
+    "latitude": null,
+    "longitude": null,
+    "description": "",
+    "amenities": [],
+    "image_url": ""
   }
 ]

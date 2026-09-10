@@ -4,6 +4,8 @@ from functools import wraps
 from werkzeug.utils import secure_filename
 import json
 import os
+import csv
+import math
 import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -85,6 +87,10 @@ WARNING_CODES = {
 # ────────────────────────────────
 # サンプルデータの読み込み
 DATA_FILE = os.path.join(APP_DIR, 'data', 'shelters.json')
+SHELTER_CSV_CANDIDATES = (
+    os.path.join(BASE_DIR, 'all_evacuation_sites_combined.csv'),
+    os.path.join(APP_DIR, 'data', 'all_evacuation_sites_combined.csv'),
+)
 INSTRUCTIONS_FILE = os.path.join(APP_DIR, 'data', 'instructions.json')
 UPLOAD_DIR = os.path.join(APP_DIR, 'uploads')
 POSTS_FILE = os.path.join(APP_DIR, 'data', 'damage_posts.json')
@@ -102,7 +108,84 @@ def load_json(path, default):
     except (FileNotFoundError, json.JSONDecodeError):
         return default
 
-shelters = load_json(DATA_FILE, [])
+REGION_NAMES = {
+    'hokubu': '北部',
+    'chuubu': '中央(1)',
+    'chuubu2': '中央(2)',
+    'toubu': '東部',
+    'nanbu': '南部',
+    'namioka': '浪岡地区',
+}
+CSV_FIELDS = (
+    '地域区分', 'No', '地区(大字・町名)', '施設名称', '所在地',
+    '洪水', '土砂災害', '高潮', '地震', '津波', '大規模な火事',
+    '内水氾濫・火山現象', '指定避難所'
+)
+
+
+def parse_coordinate(value):
+    try:
+        coordinate = float(value)
+    except (TypeError, ValueError):
+        return None
+    return coordinate if math.isfinite(coordinate) else None
+
+
+def valid_aomori_coordinate(lat, lng, region_code=None):
+    """青森市と浪岡地区を含む陸域の広い許容範囲だけを通す。"""
+    if lat is None or lng is None or not (40.45 <= lat <= 41.15 and 140.35 <= lng <= 141.10):
+        return False
+    region_bounds = {
+        'hokubu': (40.82, 41.15, 140.55, 141.10),
+        'chuubu': (40.72, 40.95, 140.55, 141.10),
+        'chuubu2': (40.72, 40.95, 140.55, 141.10),
+        'toubu': (40.65, 40.95, 140.80, 141.10),
+        'nanbu': (40.45, 40.80, 140.55, 141.10),
+        'namioka': (40.55, 40.85, 140.35, 140.75),
+    }
+    bounds = region_bounds.get(region_code)
+    return not bounds or (bounds[0] <= lat <= bounds[1] and bounds[2] <= lng <= bounds[3])
+
+
+def normalize_shelter(raw, fallback_id):
+    region_code = str(raw.get('地域区分', raw.get('region_code', '')) or '').strip()
+    district = REGION_NAMES.get(region_code, '未分類')
+    lat = parse_coordinate(raw.get('lat'))
+    lng = parse_coordinate(raw.get('lng'))
+    if not valid_aomori_coordinate(lat, lng, region_code):
+        lat = lng = None
+    shelter = {
+        'id': raw.get('id', raw.get('No', fallback_id)),
+        'name': str(raw.get('施設名称', raw.get('name', '')) or '').strip(),
+        'district': district,
+        'region_code': region_code,
+        'area': str(raw.get('地区(大字・町名)', raw.get('area', '')) or '').strip(),
+        'address': str(raw.get('所在地', raw.get('address', '')) or '').strip(),
+        'lat': lat,
+        'lng': lng,
+    }
+    for field in CSV_FIELDS[5:]:
+        if field in raw:
+            shelter[field] = raw[field]
+    for field in ('capacity', 'description'):
+        if field in raw:
+            shelter[field] = raw[field]
+    return shelter
+
+
+def load_shelters():
+    csv_path = next((path for path in SHELTER_CSV_CANDIDATES if os.path.isfile(path)), None)
+    if csv_path:
+        with open(csv_path, encoding='utf-8-sig', newline='') as source:
+            return [
+                normalize_shelter(row, index)
+                for index, row in enumerate(csv.DictReader(source), start=1)
+                if row.get('施設名称')
+            ]
+    return [normalize_shelter(row, index) for index, row in enumerate(load_json(DATA_FILE, []), start=1)]
+
+
+shelters = load_shelters()
 instructions = load_json(INSTRUCTIONS_FILE, [])
 damage_posts = load_json(POSTS_FILE, [])
 
@@ -160,9 +243,13 @@ def format_report_time(iso_str):
         return iso_str
 
 
-def filter_shelters(district=None):
-    """district 指定があれば一致する避難所のみ、なければ全件を返す"""
-    return [s for s in shelters if not district or s.get('district') == district]
+def filter_shelters(district=None, area=None):
+    """表示地域名と地区名で絞り込む。全域指定は絞り込まない。"""
+    return [
+        shelter for shelter in shelters
+        if (not district or district == '全域' or shelter.get('district') == district)
+        and (not area or area == '全域' or shelter.get('area') == area)
+    ]
 
 
 def fetch_jma_json(url):
@@ -478,7 +565,9 @@ def shelter_register():
 # 避難所検索ページ
 @app.route('/shelter_search')
 def shelter_search():
-    return render_template('shelter_search.html')
+    districts = sorted({s['district'] for s in shelters if s.get('district') != '未分類'})
+    areas = sorted({s['area'] for s in shelters if s.get('area')})
+    return render_template('shelter_search.html', shelters=shelters, districts=districts, areas=areas)
 
 # 全施設一覧ページ
 @app.route('/all_shelters')
@@ -496,19 +585,13 @@ def board():
 # 検索結果ページ：templates/search_results.html を返す
 @app.route('/search_results')
 def search_results():
-    results = filter_shelters(request.args.get('district'))
+    results = filter_shelters(request.args.get('district'), request.args.get('area'))
     return render_template('search_results.html', results=results)
 
 # JSON API：/shelters?district=地区名
 @app.route('/shelters', methods=['GET'])
 def get_shelters():
-    results = filter_shelters(request.args.get('district'))
-
-    if not results:
-        # 見つからなければエラー JSON を返す
-        return jsonify({'error': 'No shelters found'}), 404
-
-    # 見つかったらリストを JSON で返す
+    results = filter_shelters(request.args.get('district'), request.args.get('area'))
     return jsonify(results)
 
 # 気象警報・注意報API

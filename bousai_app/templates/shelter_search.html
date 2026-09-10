@@ -2,7 +2,107 @@
 
 {% block content %}
 <h2>避難所検索</h2>
-<p>登録されている避難所を確認できます。</p>
+<p>地域または地区を選ぶと、該当施設が見える範囲へ地図を移動します。</p>
 
+<style>
+	.shelter-filters { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+	.shelter-filters label { display: grid; gap: 4px; min-width: 220px; }
+	.shelter-filters select { min-height: 42px; padding: 6px; font-size: 1rem; }
+	#shelterMap { height: 420px; border: 1px solid var(--line-color); }
+	#shelterMapStatus { min-height: 1.5em; }
+	.shelter-details { min-height: 80px; margin-top: 16px; padding: 12px; border: 1px solid var(--line-color); }
+	.shelter-details dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
+	.shelter-popup { line-height: 1.6; }
+	.shelter-popup strong { display: block; margin-bottom: 4px; }
+	.shelter-popup button, .shelter-popup a { display: inline-block; margin: 8px 4px 0 0; padding: 4px 8px; color: #222; background: var(--button-blue); border: 1px solid #8998a6; text-decoration: none; }
+	@media (max-width: 600px) { #shelterMap { height: 320px; } .shelter-filters label { min-width: 100%; } }
+</style>
+
+<div class="shelter-filters">
+	<label for="districtSelect">地域
+		<select id="districtSelect">
+			<option value="全域">全域</option>
+			{% for district in districts %}<option value="{{ district }}">{{ district }}</option>{% endfor %}
+			{% if '未分類' in shelters|map(attribute='district')|list %}<option value="未分類">未分類</option>{% endif %}
+		</select>
+	</label>
+	<label for="areaSelect">地区
+		<select id="areaSelect"><option value="全域">全域</option></select>
+	</label>
+</div>
+<p id="shelterMapStatus" role="status"></p>
+<div id="shelterMap" aria-label="避難所の地図"></div>
+<section id="shelterDetails" class="shelter-details" aria-live="polite"><p>マーカーの「詳細」から施設情報を表示できます。</p></section>
 <p><a href="/all_shelters">全施設一覧</a></p>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+	(() => {
+		const shelters = {{ shelters|tojson }};
+		const center = [40.8246, 140.7400];
+		const map = L.map('shelterMap').setView(center, 11);
+		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+			attribution: '&copy; OpenStreetMap contributors'
+		}).addTo(map);
+		const markerLayer = L.layerGroup().addTo(map);
+		const districtSelect = document.getElementById('districtSelect');
+		const areaSelect = document.getElementById('areaSelect');
+		const status = document.getElementById('shelterMapStatus');
+		const details = document.getElementById('shelterDetails');
+		const markerById = new Map();
+
+		const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
+			'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+		}[character]));
+		const validPosition = (shelter) => Number.isFinite(shelter.lat) && Number.isFinite(shelter.lng);
+		const detailsHtml = (shelter) => {
+			const extra = Object.entries(shelter).filter(([key]) => ['capacity', 'description', '洪水', '土砂災害', '高潮', '地震', '津波', '大規模な火事', '内水氾濫・火山現象', '指定避難所'].includes(key) && shelter[key]);
+			return `<h3>${escapeHtml(shelter.name || '施設')}</h3><dl><dt>地域</dt><dd>${escapeHtml(shelter.district)}</dd><dt>地区</dt><dd>${escapeHtml(shelter.area)}</dd><dt>住所</dt><dd>${escapeHtml(shelter.address)}</dd>${extra.map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd>`).join('')}</dl>`;
+		};
+		const popupHtml = (shelter) => {
+			const destination = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${shelter.lat},${shelter.lng}`)}`;
+			return `<div class="shelter-popup"><strong>${escapeHtml(shelter.name || '施設')}</strong><div>地域: ${escapeHtml(shelter.district)}</div><div>地区: ${escapeHtml(shelter.area)}</div><div>住所: ${escapeHtml(shelter.address)}</div><button type="button" data-detail-id="${escapeHtml(shelter.id)}">詳細</button><a href="${destination}" target="_blank" rel="noopener noreferrer">ルート案内</a></div>`;
+		};
+
+		shelters.filter(validPosition).forEach((shelter) => {
+			const marker = L.circleMarker([shelter.lat, shelter.lng], { radius: 8, color: '#c00', fillColor: '#e33', fillOpacity: 0.85 });
+			marker.bindPopup(popupHtml(shelter));
+			marker.addTo(markerLayer);
+			markerById.set(String(shelter.id), marker);
+		});
+
+		function updateAreas() {
+			const district = districtSelect.value;
+			const areas = [...new Set(shelters.filter((shelter) => (!district || district === '全域' || shelter.district === district) && shelter.area).map((shelter) => shelter.area))].sort();
+			areaSelect.innerHTML = '<option value="全域">全域</option>' + areas.map((area) => `<option value="${escapeHtml(area)}">${escapeHtml(area)}</option>`).join('');
+		}
+
+		function moveToSelection() {
+			const district = districtSelect.value;
+			const area = areaSelect.value;
+			const selected = shelters.filter((shelter) => (!district || district === '全域' || shelter.district === district) && (!area || area === '全域' || shelter.area === area));
+			const positions = selected.filter(validPosition).map((shelter) => [shelter.lat, shelter.lng]);
+			if (!positions.length) {
+				map.setView(center, 11);
+				status.textContent = '選択した範囲に座標付きの施設がありません。青森市全域を表示しています。';
+				return;
+			}
+			map.fitBounds(L.latLngBounds(positions), { padding: [30, 30], maxZoom: 15 });
+			status.textContent = `${selected.length}件の施設を表示しています。`;
+		}
+
+		districtSelect.addEventListener('change', () => { updateAreas(); areaSelect.value = '全域'; moveToSelection(); });
+		areaSelect.addEventListener('change', moveToSelection);
+		document.addEventListener('click', (event) => {
+			const button = event.target.closest('[data-detail-id]');
+			if (!button) return;
+			const shelter = shelters.find((item) => String(item.id) === button.dataset.detailId);
+			if (shelter) details.innerHTML = detailsHtml(shelter);
+		});
+		updateAreas();
+		moveToSelection();
+		if (!markerById.size) status.textContent = '座標を確認できる施設がありません。施設一覧では確認できます。';
+	})();
+</script>
 {% endblock %}

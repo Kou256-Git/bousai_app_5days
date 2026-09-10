@@ -6,7 +6,11 @@
 {% if results %}
   <ul>
     {% for shelter in results %}
-    <li>{{ shelter.name }}</li>
+    <li>
+      <strong>{{ shelter.name }}</strong><br>
+      地域: {{ shelter.district }} / 地区: {{ shelter.area or '未設定' }}<br>
+      住所: {{ shelter.address or '未設定' }}
+    </li>
     {% endfor %}
   </ul>
 {% else %}
